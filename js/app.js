@@ -467,35 +467,42 @@ function showHwPreview(pid) {
         if (specs.length) specSections += `<div class="preview-section"><div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div><ul class="hw-spec-list">${specs.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul></div>`;
     }
 
-    showModal(`
-        <div style="text-align:center;margin-bottom:20px">
-            <div style="display:inline-flex;align-items:center;gap:8px">
-                <span class="format-badge ${fmt === 'standard' ? 'is-standard' : 'is-nonstandard'}"><i class="ph ${fmt === 'standard' ? 'ph-list-bullets' : 'ph-cube'}"></i> ${fmt === 'standard' ? 'Standard' : 'Non-standard'}</span>
-                <span style="font-size:12px;color:#86868b;font-weight:500">Storefront Preview</span>
+    ensurePreviewDrawer();
+    sdDrawer.innerHTML = `
+        <button class="sd-close" type="button" onclick="closeSwPreview()" aria-label="Close preview">&times;</button>
+        <div class="sd-body" style="padding:28px 24px 36px">
+            <div style="text-align:center;margin-bottom:20px">
+                <div style="display:inline-flex;align-items:center;gap:8px">
+                    <span class="format-badge ${fmt === 'standard' ? 'is-standard' : 'is-nonstandard'}"><i class="ph ${fmt === 'standard' ? 'ph-list-bullets' : 'ph-cube'}"></i> ${fmt === 'standard' ? 'Standard' : 'Non-standard'}</span>
+                    <span style="font-size:12px;color:#86868b;font-weight:500">Storefront Preview</span>
+                </div>
             </div>
-        </div>
-        <div class="hw-preview-card" style="max-width:380px;margin:0 auto">
-            <div class="hw-preview-media">
-                ${p.image_data ? `<img src="${p.image_data}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover">` : `<div class="hw-placeholder-icon" aria-hidden="true">
-                    <div class="hw-placeholder-device"></div>
-                    <div class="hw-placeholder-device"></div>
-                </div>`}
+            <div class="hw-preview-card" style="max-width:380px;margin:0 auto">
+                <div class="hw-preview-media">
+                    ${p.image_data ? `<img src="${p.image_data}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover">` : `<div class="hw-placeholder-icon" aria-hidden="true">
+                        <div class="hw-placeholder-device"></div>
+                        <div class="hw-placeholder-device"></div>
+                    </div>`}
+                </div>
+                <div class="hw-preview-body">
+                    <h4 class="hw-preview-title">${esc(p.name)}</h4>
+                    <div class="hw-preview-category">${esc(p.sub_category || '')}</div>
+                    <hr class="hw-preview-divider">
+                    ${specSections || '<div style="padding:10px 14px;color:#6d7695;font-size:0.82rem;font-style:italic">No specifications</div>'}
+                    ${isAidaptiv ? `<div class="hw-aidaptiv-row">
+                        <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
+                        <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
+                    </div>` : ''}
+                    <button type="button" class="hw-preview-cta">${fmt === 'standard' ? 'Select Hardware' : 'Next: View Spec'}</button>
+                </div>
             </div>
-            <div class="hw-preview-body">
-                <h4 class="hw-preview-title">${esc(p.name)}</h4>
-                <div class="hw-preview-category">${esc(p.sub_category || '')}</div>
-                <hr class="hw-preview-divider">
-                ${specSections || '<div style="padding:10px 14px;color:#6d7695;font-size:0.82rem;font-style:italic">No specifications</div>'}
-                ${isAidaptiv ? `<div class="hw-aidaptiv-row">
-                    <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
-                    <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
-                </div>` : ''}
-                <button type="button" class="hw-preview-cta">${fmt === 'standard' ? 'Select Hardware' : 'Next: View Spec'}</button>
-            </div>
-        </div>
-        <div style="margin-top:16px;text-align:center">
-            <button onclick="closeModal()" class="btn-secondary">Close Preview</button>
-        </div>`);
+        </div>`;
+
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => {
+        sdBackdrop.classList.add('is-open');
+        sdDrawer.classList.add('is-open');
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -850,10 +857,11 @@ function isValidProductImageFile(file) {
 }
 
 function getMatchingVendorId(vendorName, vendorType) {
+    // Vendor is a free-text field. Link to an existing org only on an exact
+    // name match; otherwise leave vendor_id null (vendor_name is the source of truth).
     const target = String(vendorName || '').trim().toLowerCase();
-    const org = ORGS.find(o => o.type === 'vendor' && o.vendor_type === vendorType && o.name.toLowerCase() === target)
-        || ORGS.find(o => o.type === 'vendor' && o.vendor_type === vendorType);
-    return org?.id || `v-${vendorType}-draft`;
+    const org = ORGS.find(o => o.type === 'vendor' && o.vendor_type === vendorType && o.name.toLowerCase() === target);
+    return org ? org.id : null;
 }
 
 function renderHardwareSpecInputs() {
@@ -1444,7 +1452,6 @@ function showCreateProductModal(type) {
     const isSW = type === 'software';
     createProductState = { type, hardwareImage: null, softwareIcon: null, softwareImages: [] };
     const title = isSW ? 'Create Software Product Draft' : 'Create Hardware Product Draft';
-    const vendorOptions = ORGS.filter(o => o.type === 'vendor' && o.vendor_type === type).map(o => `<option value="${esc(o.name)}"></option>`).join('');
     const hardwareOptions = HARDWARE_PRODUCT_TYPES
         .filter(item => item.is_active)
         .map(item => `<option value="${esc(item.label)}">${esc(item.label)}</option>`)
@@ -1473,8 +1480,7 @@ function showCreateProductModal(type) {
                 </select>
                 <div id="new-p-product-type-error" class="field-error-text"></div>
             </div>
-        </div>
-        <datalist id="new-p-vendor-options">${vendorOptions}</datalist>`)}
+        </div>`)}
 
         <!-- ── Standard-only fields ── -->
         <div id="hw-standard-section">
@@ -1545,7 +1551,6 @@ function showCreateProductModal(type) {
         ${createFormSection('ph-identification-card', 'Basic Info', 'Product identity shown in lists and storefront preview.', `
         ${createField('new-p-name', 'Product Name', { required: true, maxlength: 100, placeholder: 'e.g. OrientAI Express' })}
         ${createField('new-p-vendor', 'Vendor', { required: true, maxlength: 100, placeholder: 'e.g. TPIsoftware Corporation' })}
-        <datalist id="new-p-vendor-options">${vendorOptions}</datalist>
         <div>
             <label class="field-label">Product Icon</label>
             <label class="file-upload-wrap">
@@ -1630,7 +1635,6 @@ function showCreateProductModal(type) {
         event.preventDefault();
         createProduct(type);
     });
-    document.getElementById('new-p-vendor')?.setAttribute('list', 'new-p-vendor-options');
     setupCreateProductBindings(type);
 }
 
@@ -2185,9 +2189,17 @@ function saveProduct(pid) {
 
     // Reset edit image state
     editSwImages = []; editSwIcon = null; editHwImage = null;
+
+    // Editing a live (published) product sends it back to Unpublished so the
+    // change is re-reviewed before it goes live again. Drafts / unpublished /
+    // archived keep their status.
+    const wasPublished = p.status === 'published';
+    if (wasPublished) p.status = 'unpublished';
+
     logActivity('Updated', p.name, isSW ? 'software' : 'hardware');
+    if (wasPublished) logActivity('Unpublished', p.name, 'Edited while live — re-publish required');
     closeModal();
-    showToast(`${p.name} updated`, 'success');
+    showToast(wasPublished ? `${p.name} updated — moved to Unpublished. Re-publish to make it live.` : `${p.name} updated`, 'success');
     if (isSW) { renderSwProducts(); showSwDetail(pid); }
     else { renderHwProducts(); showHwDetail(pid); }
 }
