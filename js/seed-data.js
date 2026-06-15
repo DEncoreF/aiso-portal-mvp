@@ -1,0 +1,256 @@
+// ═══════════════════════════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════════════════════════
+
+const SUPER_ADMIN_USER = { role: 'SUPER_ADMIN', name: 'System Root', email: 'root@aiso.com', label: 'Super Admin', avatar: 'SA' };
+
+const ORGS = [
+    { id: 'v-phison', name: 'Phison Electronics', type: 'vendor', vendor_type: 'hardware', status: 'active',
+      members: [
+        { id: 'm1', name: 'James Chen', email: 'james@phison.com', org_role: 'OA', status: 'active' },
+        { id: 'm2', name: 'Kevin Wu', email: 'kevin@phison.com', org_role: 'CM', status: 'active' },
+      ]
+    },
+    { id: 'v-tpi', name: 'TPIsoftware Corporation', type: 'vendor', vendor_type: 'software', status: 'active',
+      members: [
+        { id: 'm3', name: 'David Lin', email: 'david@tpisoftware.com', org_role: 'OA', status: 'active' },
+        { id: 'm4', name: 'Grace Lee', email: 'grace@tpisoftware.com', org_role: 'CM', status: 'active' },
+      ]
+    },
+    { id: 'v-kdan', name: 'KDAN', type: 'vendor', vendor_type: 'software', status: 'active',
+      members: [
+        { id: 'm5', name: 'Eric Wang', email: 'eric@kdan.com', org_role: 'OA', status: 'active' },
+      ]
+    },
+    { id: 'c-megabank', name: 'MegaBank Corp', type: 'customer', vendor_type: null, status: 'active',
+      members: [
+        { id: 'm6', name: 'Tom Baker', email: 'tom@megabank.com', org_role: 'OA', status: 'active' },
+        { id: 'm7', name: 'Amy Zhang', email: 'amy@megabank.com', org_role: 'CM', status: 'active' },
+      ]
+    },
+    { id: 'c-govcloud', name: 'GovCloud Agency', type: 'customer', vendor_type: null, status: 'active',
+      members: [
+        { id: 'm8', name: 'Robert Kim', email: 'robert@govcloud.gov', org_role: 'OA', status: 'active' },
+      ]
+    },
+];
+
+let PRODUCTS = [
+    // === HARDWARE ===
+    {
+        id: 'hw1', product_type: 'hardware', product_format: 'standard', vendor_id: 'v-phison', vendor_name: 'Phison Electronics',
+        name: 'GIGABYTE Workstation', model: 'W773-80', brand: 'GIGABYTE', sub_category: 'Workstation', display_order: 1,
+        short_description: 'Professional AI workstation for AI engineers and data scientists.',
+        status: 'published', created_at: '2026-01-15', updated_at: '2026-03-10',
+        is_aidaptiv: true,
+        key_specifications: [
+            'Intel Core Ultra 9 185H (60 Core)',
+            'NVIDIA Pro6000 Blackwell Max-Q 96GB x2',
+            '8x DDR5 5600 64GB',
+            'Phison X200 7680GB x2 (aiDAPTIV Cache)',
+            '2x 960GB SATA SSD RAID 1',
+            'Ubuntu 24.04',
+        ],
+        bestFor: ['AI Platform', 'Visual Effects', 'HPC', 'Data Science'],
+    },
+    {
+        id: 'hw2', product_type: 'hardware', product_format: 'standard', vendor_id: 'v-phison', vendor_name: 'Phison Electronics',
+        name: 'Gigacomputing 4U Server (4x GPU)', model: 'G494-SB4-AAP2', brand: 'Gigacomputing', sub_category: 'Rack Server', display_order: 2,
+        short_description: 'Enterprise AI inference server with 4x GPU configuration.',
+        status: 'published', created_at: '2026-01-10', updated_at: '2026-03-08',
+        is_aidaptiv: true,
+        key_specifications: [
+            '2x Intel Xeon 6730P 32Core',
+            '4x NVIDIA Pro6000 Blackwell 96GB',
+            '16x DDR5 5600 64GB',
+            '4x Phison X200 7680GB (aiDAPTIV Cache)',
+            'Dual 10Gb LAN',
+            'Ubuntu 24.04',
+        ],
+        bestFor: ['AI Training', 'Multi-model Inference', 'Enterprise AI'],
+    },
+    {
+        id: 'hw3', product_type: 'hardware', product_format: 'standard', vendor_id: 'v-phison', vendor_name: 'Phison Electronics',
+        name: 'Gigacomputing 4U Server (8x GPU)', model: 'G494-SB4-AAP2', brand: 'Gigacomputing', sub_category: 'Rack Server', display_order: 3,
+        short_description: 'Large-scale AI training server with 8x GPU for maximum parallel processing.',
+        status: 'draft', created_at: '2026-03-01', updated_at: '2026-03-18',
+        is_aidaptiv: false,
+        key_specifications: [
+            '2x Intel Xeon 6730P 32Core',
+            '8x NVIDIA Pro6000 Blackwell 96GB',
+            '16x DDR5 5600 64GB',
+            'Dual 10Gb LAN',
+            'Ubuntu 24.04',
+        ],
+        bestFor: ['Large-scale Training', 'LLM Fine-tuning', 'HPC'],
+    },
+    // === SOFTWARE ===
+    {
+        id: 'sw1', product_type: 'software', vendor_id: 'v-tpi', vendor_name: 'TPIsoftware Corporation',
+        name: 'digiRunner', brand: 'TPIsoftware', sub_category: 'AI Governance Platform', categories: ['AI Governance Platform', 'Cybersecurity'], display_order: 1,
+        short_description: 'AI Governance Platform for Enhanced Security and Cost Observability',
+        status: 'published', created_at: '2025-11-20', updated_at: '2026-03-12',
+        tagline: 'AI Governance Platform for Enhanced Security and Cost Observability',
+        sw_category: 'included',
+        features: [
+            'Centralizes management of AI models and LLMs; monitors API usage',
+            'Improves system performance with microservices architecture',
+            'Access control through encryption and authentication',
+            'Real-time token consumption insights',
+        ],
+        industries: ['IoT', 'Banking & Finance', 'Healthcare', 'E-commerce & Retail', 'IT', 'Manufacturing', 'Government'],
+        officialUrl: 'https://www.tpisoftware.com',
+        videoUrl: 'https://www.youtube.com/watch?v=demo1',
+    },
+    {
+        id: 'sw2', product_type: 'software', vendor_id: 'v-tpi', vendor_name: 'TPIsoftware Corporation',
+        name: 'SysTalk.VIKI', brand: 'TPIsoftware', sub_category: 'Enterprise GenAI Platform', categories: ['Enterprise GenAI Platform', 'Business Applications'], display_order: 2,
+        short_description: 'Enterprise Generative AI Application Platform for knowledge management',
+        status: 'published', created_at: '2025-10-15', updated_at: '2026-03-10',
+        tagline: 'Enterprise Generative AI Application Platform',
+        sw_category: 'included',
+        features: [
+            'Enterprise-Grade Knowledge Integration & Governance',
+            'Multi-Role AI Assistants for Diverse Business Scenarios',
+            'Natural Language Interaction with High-Accuracy Knowledge Retrieval',
+            'Scalable, Modular Architecture for Rapid AI Adoption',
+        ],
+        industries: ['Banking & Finance', 'Healthcare', 'E-commerce & Retail', 'IT', 'Manufacturing', 'Government'],
+        officialUrl: 'https://www.tpisoftware.com',
+        videoUrl: '',
+    },
+    {
+        id: 'sw3', product_type: 'software', vendor_id: 'v-tpi', vendor_name: 'TPIsoftware Corporation',
+        name: 'OrientAI Express', brand: 'TPIsoftware', sub_category: 'AI Knowledge & Assistant Platform', categories: ['AI Knowledge & Assistant Platform'], display_order: 3,
+        short_description: 'Agile AI Knowledge & Assistant Platform',
+        status: 'draft', created_at: '2026-02-10', updated_at: '2026-03-19',
+        tagline: 'Agile AI Knowledge & Assistant Platform',
+        sw_category: 'optional',
+        compatible_hardware: ['hw1', 'hw2'],
+        features: [
+            'Agile knowledge management with rapid, zero-configuration deployment.',
+            'Secure, scalable edge architecture with full data sovereignty and no cloud dependency.',
+            'Flexible LLM selection for optimized contextual applications.',
+            'Purpose-built AI assistants for diverse enterprise workflows and use cases.',
+        ],
+        industries: ['IoT', 'Banking & Finance', 'Healthcare', 'E-commerce & Retail', 'Information Technology', 'Manufacturing', 'Government & Public Sector'],
+        officialUrl: 'https://www.tpisoftware.com',
+        videoUrl: '',
+    },
+    {
+        id: 'sw4', product_type: 'software', vendor_id: 'v-tpi', vendor_name: 'TPIsoftware Corporation',
+        name: 'digiFlexis', brand: 'TPIsoftware', sub_category: 'BPM Platform', categories: ['BPM Platform'], display_order: 4,
+        short_description: 'Business Process Management Platform for Integrated Workflow Automation',
+        status: 'draft', created_at: '2026-03-15', updated_at: '2026-03-20',
+        tagline: 'Business Process Management Platform for Integrated Workflow Automation',
+        sw_category: 'optional',
+        compatible_hardware: ['hw1'],
+        features: [
+            'Form Builder with drag-and-drop customization',
+            'Workflow Design with conditional logic and batch approvals',
+            'Automated Notifications with deadline alerts',
+            'Cloud-based API Integration',
+        ],
+        industries: ['Banking & Finance', 'Healthcare', 'E-commerce & Retail', 'IT', 'Manufacturing', 'Government'],
+        officialUrl: 'https://www.tpisoftware.com',
+        videoUrl: '',
+    },
+    {
+        id: 'sw5', product_type: 'software', vendor_id: 'v-kdan', vendor_name: 'KDAN',
+        name: 'ComPDF AI', brand: 'KDAN', sub_category: 'Document Processing', categories: ['Document Processing'], display_order: 5,
+        short_description: 'Intelligent Document Processing & Automation Platform',
+        status: 'published', created_at: '2026-01-05', updated_at: '2026-03-15',
+        tagline: 'Intelligent Document Processing & Automation Platform',
+        sw_category: 'optional',
+        compatible_hardware: ['hw1', 'hw2'],
+        features: [
+            'End-to-End Document Automation workflow',
+            'Flexible Deployment options (self-hosted, private/public cloud)',
+            'AI + Rule Hybrid Models combining NLP, CV, OCR',
+            'High-speed processing with up to 99% accuracy',
+        ],
+        industries: ['Government', 'Finance', 'Healthcare', 'Logistics', 'Education', 'Legal', 'Manufacturing'],
+        officialUrl: 'https://www.compdf.com',
+        videoUrl: 'https://www.youtube.com/watch?v=demo2',
+    },
+    {
+        id: 'sw6', product_type: 'software', vendor_id: 'v-tpi', vendor_name: 'TPIsoftware Corporation',
+        name: 'GreenSwift', brand: 'TPIsoftware', sub_category: 'ESG / Carbon Management', categories: ['ESG / Carbon Management'], display_order: 6,
+        short_description: 'AI-Driven Greenhouse Gas Emissions Management Platform',
+        status: 'draft', created_at: '2026-03-18', updated_at: '2026-03-22',
+        tagline: 'AI-Driven Greenhouse Gas Emissions Management Platform',
+        sw_category: 'optional',
+        compatible_hardware: [],
+        features: [
+            'Unified GHG emissions inventory management',
+            'Automated emissions factor matching',
+            'Multi-national emissions factor databases',
+            'Group-wide aggregated GHG data reporting',
+        ],
+        industries: ['Banking & Finance', 'Healthcare', 'E-commerce & Retail', 'IT', 'Manufacturing', 'Government'],
+        officialUrl: 'https://www.tpisoftware.com',
+        videoUrl: '',
+    },
+];
+
+// Initialize history for all products
+PRODUCTS.forEach(p => { if (!p.history) p.history = []; });
+
+// ═══════════════════════════════════════════════════════════════════
+// NAV CONFIG — per role
+// ═══════════════════════════════════════════════════════════════════
+
+const NAV_ITEMS = [
+    { key: 'sw-products', icon: 'ph-app-window', label: 'Software Products' },
+    { key: 'hw-products', icon: 'ph-hard-drives', label: 'Hardware Products' },
+    { key: 'param-center', icon: 'ph-sliders', label: 'Parameter Center' },
+    { key: 'activity-log', icon: 'ph-clock-counter-clockwise', label: 'Activity Log' },
+    { key: 'settings', icon: 'ph-gear', label: 'Settings' },
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+
+let currentUser = null;
+let currentView = null;
+
+let HARDWARE_PRODUCT_TYPES = [
+    { label: 'miniPC', is_active: true },
+    { label: 'AITPC', is_active: true },
+    { label: 'AITNB', is_active: true },
+    { label: 'AI Box', is_active: true },
+    { label: 'Workstation', is_active: true },
+    { label: 'Rack Server', is_active: true },
+];
+let SOFTWARE_CATEGORY_OPTIONS = [
+    { label: 'Business Applications', is_active: true },
+    { label: 'Cybersecurity', is_active: true },
+    { label: 'ESG', is_active: true },
+    { label: 'Financial Services', is_active: true },
+    { label: 'Fraud Prevention', is_active: true },
+    { label: 'Healthcare', is_active: true },
+    { label: 'Marketing', is_active: true },
+    { label: 'National Defense', is_active: true },
+];
+let SOFTWARE_INDUSTRY_OPTIONS = [
+    { label: 'IoT', is_active: true },
+    { label: 'Banking & Finance', is_active: true },
+    { label: 'Healthcare', is_active: true },
+    { label: 'E-commerce & Retail', is_active: true },
+    { label: 'Information Technology', is_active: true },
+    { label: 'Manufacturing', is_active: true },
+    { label: 'Government & Public Sector', is_active: true },
+];
+const HW_KEY_SPEC_MAX_ITEMS = 8;
+const HW_KEY_SPEC_MIN_ITEMS = 3;
+const HW_KEY_SPEC_MAX_CHARS = 150;
+const SOFTWARE_FEATURE_MAX_ITEMS = 5;
+const SOFTWARE_FEATURE_MAX_CHARS = 150;
+const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const PRODUCT_IMAGE_ERROR = 'File exceeds the size limit or has an unsupported format.';
+let createProductState = { type: null, hardwareImage: null, softwareIcon: null, softwareImages: [] };
+
+let sortState = { software: { key: null, dir: 'asc' }, hardware: { key: null, dir: 'asc' } };
+let ACTIVITY_LOG = [];
+

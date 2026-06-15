@@ -1,0 +1,2537 @@
+// ═══════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════
+
+function esc(v) { return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function logActivity(action, productName, detail = '', pid = null) {
+    const ts = new Date().toISOString();
+    const entry = { action, productName, detail, timestamp: ts, user: currentUser?.name || 'System' };
+    ACTIVITY_LOG.unshift(entry);
+    if (ACTIVITY_LOG.length > 50) ACTIVITY_LOG.length = 50;
+    // Also write to product history
+    const p = pid ? PRODUCTS.find(x => x.id === pid) : PRODUCTS.find(x => x.name === productName);
+    if (p) {
+        if (!p.history) p.history = [];
+        p.history.unshift({ action, detail, timestamp: ts, user: entry.user });
+    }
+    Store.save();
+}
+
+function canManageProduct(p) { return true; /* Super Admin has full access */ }
+function getSwCategories(p) { return p.categories?.length ? p.categories : (p.sub_category ? [p.sub_category] : []); }
+function findCompatRefs(hwId) { return PRODUCTS.filter(p => p.product_type === 'software' && p.status !== 'archived' && (p.compatible_hardware || []).includes(hwId)); }
+function getVisibleProducts(type) { return PRODUCTS.filter(p => p.product_type === type && p.status !== 'archived'); }
+function getAllProducts(type) { return PRODUCTS.filter(p => p.product_type === type); }
+function getUserInitials(name = '') { return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2); }
+function isSuperAdmin() { return true; }
+function isAdmin() { return true; }
+
+function statusBadge(s) {
+    const m = {
+        published: '<span class="badge badge-published">Published</span>',
+        draft: '<span class="badge badge-draft">Draft</span>',
+        unpublished: '<span class="badge badge-unpublished">Unpublished</span>',
+        archived: '<span class="badge badge-archived">Archived</span>',
+    };
+    return m[s] || `<span class="badge badge-zinc">${esc(s)}</span>`;
+}
+
+function showToast(msg, type = 'success') {
+    const el = document.createElement('div');
+    const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' };
+    el.className = `toast-animate text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg ${colors[type] || colors.success}`;
+    el.textContent = msg;
+    document.getElementById('toast-root').appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function showModal(html, wide = false) {
+    const root = document.getElementById('modal-root');
+    const modalClass = wide === 'edit' ? 'modal-edit' : wide ? 'modal-wide' : '';
+    root.innerHTML = `<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal-card ${modalClass}">${html}</div></div>`;
+}
+
+function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+
+// ═══════════════════════════════════════════════════════════════════
+// LOGIN / LOGOUT
+// ═══════════════════════════════════════════════════════════════════
+
+function initPortal() {
+    currentUser = { ...SUPER_ADMIN_USER };
+    document.getElementById('user-name').textContent = currentUser.name;
+    document.getElementById('user-role').textContent = currentUser.label;
+    document.getElementById('user-avatar').textContent = getUserInitials(currentUser.name);
+    document.getElementById('header-role-chip').textContent = 'Super Admin';
+
+    // Build nav
+    const navEl = document.getElementById('dynamic-nav');
+    navEl.innerHTML = NAV_ITEMS.map(n => `
+        <button class="nav-item" data-nav="${n.key}" onclick="navigate('${n.key}')">
+            <span class="nav-icon"><i class="ph ${n.icon}"></i></span>
+            <span>${esc(n.label)}</span>
+        </button>
+    `).join('');
+
+    // Navigate to first
+    navigate(NAV_ITEMS[0].key);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════════════════════════
+
+function navigate(key) {
+    currentView = key;
+    // Toggle views
+    document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+    const targetEl = document.getElementById('view-' + key);
+    if (targetEl) targetEl.classList.remove('hidden');
+
+    // Active nav
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    const active = document.querySelector(`.nav-item[data-nav="${key}"]`);
+    if (active) active.classList.add('active');
+
+    // Render
+    if (key === 'sw-products') renderSwProducts();
+    else if (key === 'hw-products') renderHwProducts();
+    else if (key === 'param-center') renderParamCenter();
+    else if (key === 'activity-log') renderActivityLog();
+    else if (key === 'settings') renderSettings();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SOFTWARE PRODUCT LIST
+// ═══════════════════════════════════════════════════════════════════
+
+function setSwFilter(val) {
+    document.getElementById('sw-filter-status').value = val;
+    document.querySelectorAll('#sw-filter-tabs .filter-tab').forEach(b => b.classList.toggle('active', b.dataset.val === val));
+    renderSwProducts();
+}
+
+function setHwFilter(val) {
+    document.getElementById('hw-filter-status').value = val;
+    document.querySelectorAll('#hw-filter-tabs .filter-tab').forEach(b => b.classList.toggle('active', b.dataset.val === val));
+    renderHwProducts();
+}
+
+function renderSwProducts() {
+    const all = getAllProducts('software');
+    const searchQ = (document.getElementById('sw-search')?.value || '').toLowerCase();
+    const filterS = document.getElementById('sw-filter-status')?.value || '';
+    let list = all.filter(p => {
+        if (!filterS && p.status === 'archived') return false;
+        if (filterS && p.status !== filterS) return false;
+        if (searchQ && !p.name.toLowerCase().includes(searchQ) && !p.vendor_name.toLowerCase().includes(searchQ) && !getSwCategories(p).some(c => c.toLowerCase().includes(searchQ))) return false;
+        return true;
+    });
+    list = applySorting(list, 'software');
+    renderStatsBar('sw-stats-bar', all);
+
+    document.getElementById('sw-products-tbody').innerHTML = list.length ? list.map(p => `
+        <tr class="cursor-pointer" onclick="if(!event.target.closest('button'))showSwDetail('${p.id}')">
+            <td>
+                <div class="flex items-center gap-3">
+                    <div style="width:36px;height:36px;border-radius:10px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#86868b;flex-shrink:0">${esc(p.name.slice(0,2).toUpperCase())}</div>
+                    <div>
+                        <div style="font-weight:600;font-size:13.5px;color:#1d1d1f">${esc(p.name)}</div>
+                        <div style="font-size:12px;color:#86868b;margin-top:1px">${esc(getSwCategories(p).join(', '))}</div>
+                    </div>
+                </div>
+            </td>
+            <td><span style="color:#86868b;font-size:13px">${esc(p.vendor_name)}</span></td>
+            <td><div style="display:flex;flex-wrap:wrap;gap:4px">${getSwCategories(p).slice(0, 3).map(c => `<span class="badge badge-zinc">${esc(c)}</span>`).join('')}</div></td>
+            <td>${statusBadge(p.status)}</td>
+            <td class="text-right" onclick="event.stopPropagation()">
+                <div class="flex items-center gap-0.5 justify-end">
+                    <button onclick="showSwPreview('${p.id}')" class="btn-ghost" title="Preview"><i class="ph ph-eye"></i></button>
+                    <button onclick="showEditProductModal('${p.id}')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>
+                    ${productActionBtns(p)}
+                </div>
+            </td>
+        </tr>
+    `).join('') : `<tr><td colspan="5" class="text-center py-16">
+        <div class="flex flex-col items-center gap-3">
+            <i class="ph ph-app-window text-4xl text-[#c7c7cc]"></i>
+            <div class="text-sm text-[#86868b] font-semibold">${searchQ || filterS ? 'No matching software found' : 'No software products yet'}</div>
+            ${!searchQ && !filterS ? '<button onclick="showCreateProductModal(\'software\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Software</button>' : ''}
+        </div>
+    </td></tr>`;
+}
+
+function productActionBtns(p) {
+    let btns = '';
+    if (p.status === 'archived') {
+        btns += `<button onclick="restoreProduct('${p.id}')" class="btn-ghost" style="color:#059669" title="Restore"><i class="ph ph-arrow-counter-clockwise"></i></button>`;
+        btns += `<button onclick="confirmDeleteProduct('${p.id}')" class="btn-ghost" style="color:#dc2626" title="Delete permanently"><i class="ph ph-trash"></i></button>`;
+    } else if (p.status === 'published') {
+        btns += `<button onclick="confirmUnpublish('${p.id}')" class="btn-ghost" style="color:#d97706" title="Unpublish"><i class="ph ph-arrow-line-down"></i></button>`;
+        btns += `<button onclick="archiveProduct('${p.id}')" class="btn-ghost" style="color:#7c3aed" title="Archive"><i class="ph ph-archive"></i></button>`;
+    } else {
+        btns += `<button onclick="togglePublish('${p.id}')" class="btn-ghost" style="color:#059669" title="Publish"><i class="ph ph-arrow-line-up"></i></button>`;
+        btns += `<button onclick="archiveProduct('${p.id}')" class="btn-ghost" style="color:#7c3aed" title="Archive"><i class="ph ph-archive"></i></button>`;
+        btns += `<button onclick="confirmDeleteProduct('${p.id}')" class="btn-ghost" style="color:#dc2626" title="Delete"><i class="ph ph-trash"></i></button>`;
+    }
+    return btns;
+}
+
+// ── Sorting ──
+function toggleSort(type, key) {
+    const s = sortState[type];
+    if (s.key === key) { s.dir = s.dir === 'asc' ? 'desc' : 'asc'; }
+    else { s.key = key; s.dir = 'asc'; }
+    if (type === 'software') renderSwProducts();
+    else renderHwProducts();
+}
+
+function applySorting(list, type) {
+    const s = sortState[type];
+    if (!s.key) return list;
+    const dir = s.dir === 'asc' ? 1 : -1;
+    return [...list].sort((a, b) => {
+        const va = String(a[s.key] || '').toLowerCase();
+        const vb = String(b[s.key] || '').toLowerCase();
+        return va < vb ? -dir : va > vb ? dir : 0;
+    });
+}
+
+// ── Stats Bar ──
+function renderStatsBar(containerId, all) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    const counts = { total: all.length, published: 0, draft: 0, unpublished: 0, archived: 0 };
+    all.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
+    const chip = (label, count, color) => `<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;background:#fafbfc;border:1px solid var(--border-light);min-width:0">
+        <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>
+        <span style="font-size:12px;font-weight:600;color:#1d1d1f">${count}</span>
+        <span style="font-size:11px;color:#86868b;font-weight:500">${label}</span>
+    </div>`;
+    target.innerHTML = chip('Total', counts.total, '#1d1d1f') + chip('Published', counts.published, '#059669') + chip('Draft', counts.draft, '#6b7280') + chip('Unpublished', counts.unpublished, '#d97706') + (counts.archived ? chip('Archived', counts.archived, '#7c3aed') : '');
+}
+
+// ── Confirm Unpublish ──
+function confirmUnpublish(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fff7ed;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#d97706"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Unpublish "${esc(p.name)}"?</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 24px;line-height:1.6">This product will be removed from the storefront immediately. You can republish it anytime.</p>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="doUnpublish('${p.id}')" class="btn-primary" style="background:#d97706"><i class="ph ph-arrow-line-down"></i> Unpublish</button>
+            </div>
+        </div>`);
+}
+
+// ── Compatibility conflict guard (CR1.7) ──
+// Strip hwId from every referencing SW product, logging one entry per affected SW.
+function removeCompatRefs(hwId) {
+    const hw = PRODUCTS.find(x => x.id === hwId);
+    findCompatRefs(hwId).forEach(sw => {
+        sw.compatible_hardware = (sw.compatible_hardware || []).filter(id => id !== hwId);
+        sw.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Compatibility removed', sw.name, `${hw ? hw.name : hwId} removed from compatible hardware`, sw.id);
+    });
+}
+
+// Confirm modal shown before unpublish/archive/delete of a HW product that SW products reference.
+// confirmJs is the inline onclick that re-invokes the original action with force=true.
+function showHwCompatConflictModal(pid, actionLabel, confirmJs) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    const refNames = findCompatRefs(pid).map(sw => sw.name);
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fff7ed;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#d97706"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">${esc(actionLabel)} "${esc(p?.name || '')}"?</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 12px;line-height:1.6">This hardware is referenced as compatible hardware by:</p>
+            <div style="font-size:13px;font-weight:600;color:#1d1d1f;margin:0 0 12px;line-height:1.8">${refNames.map(n => esc(n)).join('<br>')}</div>
+            <p style="font-size:13px;color:#86868b;margin:0 0 24px;line-height:1.6">Proceeding will remove it from those products.</p>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="${confirmJs}" class="btn-primary" style="background:#d97706"><i class="ph ph-warning-circle"></i> ${esc(actionLabel)} Anyway</button>
+            </div>
+        </div>`);
+}
+
+function doUnpublish(pid, force = false) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
+        if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `doUnpublish('${pid}', true)`); return; }
+        removeCompatRefs(pid);
+    }
+    p.status = 'unpublished';
+    p.updated_at = new Date().toISOString().slice(0, 10);
+    logActivity('Unpublished', p.name);
+    closeModal();
+    showToast(`${p.name} has been unpublished`, 'info');
+    reRenderCurrentList();
+}
+
+// ── Archive ──
+function archiveProduct(pid, force = false) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
+        if (!force) { showHwCompatConflictModal(pid, 'Archive', `closeModal();archiveProduct('${pid}', true)`); return; }
+        removeCompatRefs(pid);
+    }
+    const prev = p.status;
+    p.status = 'archived';
+    p.updated_at = new Date().toISOString().slice(0, 10);
+    logActivity('Archived', p.name, `was ${prev}`);
+    showToast(`${p.name} archived`, 'info');
+    reRenderCurrentList();
+}
+
+function restoreProduct(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    p.status = 'draft';
+    p.updated_at = new Date().toISOString().slice(0, 10);
+    logActivity('Restored', p.name, 'to draft');
+    showToast(`${p.name} restored as draft`, 'success');
+    reRenderCurrentList();
+}
+
+// ── Delete (permanent) ──
+function confirmDeleteProduct(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fef2f2;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-trash" style="font-size:28px;color:#dc2626"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Permanently delete "${esc(p.name)}"?</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 16px;line-height:1.6">This action cannot be undone. Type the product name to confirm.</p>
+            <input id="delete-confirm-input" type="text" class="input-field" style="max-width:320px;margin:0 auto 20px;text-align:center" placeholder="${esc(p.name)}">
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="doDeleteProduct('${p.id}')" class="btn-primary" style="background:#dc2626"><i class="ph ph-trash"></i> Delete Forever</button>
+            </div>
+        </div>`);
+}
+
+function doDeleteProduct(pid, force = false) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    if (!force) {
+        const confirmVal = (document.getElementById('delete-confirm-input')?.value || '').trim();
+        if (confirmVal !== p.name) { showToast('Product name does not match', 'error'); return; }
+    }
+    if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
+        if (!force) { showHwCompatConflictModal(pid, 'Delete', `doDeleteProduct('${pid}', true)`); return; }
+        removeCompatRefs(pid);
+    }
+    const name = p.name;
+    PRODUCTS.splice(PRODUCTS.indexOf(p), 1);
+    logActivity('Deleted', name, 'permanently removed');
+    closeModal();
+    showToast(`${name} permanently deleted`, 'error');
+    reRenderCurrentList();
+}
+
+function reRenderCurrentList() {
+    if (currentView === 'sw-products') renderSwProducts();
+    else if (currentView === 'hw-products') renderHwProducts();
+    else if (currentView === 'param-center') renderParamCenter();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HARDWARE PRODUCT LIST
+// ═══════════════════════════════════════════════════════════════════
+
+function renderHwProducts() {
+    const all = getAllProducts('hardware');
+    const searchQ = (document.getElementById('hw-search')?.value || '').toLowerCase();
+    const filterS = document.getElementById('hw-filter-status')?.value || '';
+    let list = all.filter(p => {
+        if (!filterS && p.status === 'archived') return false;
+        if (filterS && p.status !== filterS) return false;
+        if (searchQ && !p.name.toLowerCase().includes(searchQ) && !p.vendor_name.toLowerCase().includes(searchQ) && !(p.model || '').toLowerCase().includes(searchQ)) return false;
+        return true;
+    });
+    list = applySorting(list, 'hardware');
+    renderStatsBar('hw-stats-bar', all);
+
+    document.getElementById('hw-products-tbody').innerHTML = list.length ? list.map(p => `
+        <tr class="cursor-pointer" onclick="if(!event.target.closest('button'))showHwDetail('${p.id}')">
+            <td>
+                <div class="flex items-center gap-3">
+                    <div style="width:36px;height:36px;border-radius:10px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#86868b;flex-shrink:0">${esc(p.name.slice(0,2).toUpperCase())}</div>
+                    <div>
+                        <div style="font-weight:600;font-size:13.5px;color:#1d1d1f">${esc(p.name)}</div>
+                        <div style="font-size:12px;color:#86868b;margin-top:1px">${esc(p.model || '')}</div>
+                    </div>
+                </div>
+            </td>
+            <td><span style="color:#86868b;font-size:13px">${esc(p.vendor_name || '—')}</span></td>
+            <td><span class="badge badge-zinc">${esc(p.sub_category || 'Hardware')}</span></td>
+            <td><span class="format-badge ${(p.product_format || 'standard') === 'standard' ? 'is-standard' : 'is-nonstandard'}" style="font-size:11px"><i class="ph ${(p.product_format || 'standard') === 'standard' ? 'ph-list-bullets' : 'ph-cube'}"></i> ${(p.product_format || 'standard') === 'standard' ? 'Standard' : 'Non-standard'}</span></td>
+            <td>${p.is_aidaptiv ? '<span class="badge badge-green">aiDAPTIV</span>' : '<span style="font-size:12px;color:#c7c7cc">—</span>'}</td>
+            <td>${statusBadge(p.status)}</td>
+            <td class="text-right" onclick="event.stopPropagation()">
+                <div class="flex items-center gap-0.5 justify-end">
+                    <button onclick="showHwPreview('${p.id}')" class="btn-ghost" title="Preview"><i class="ph ph-eye"></i></button>
+                    <button onclick="showEditProductModal('${p.id}')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>
+                    ${productActionBtns(p)}
+                </div>
+            </td>
+        </tr>
+    `).join('') : `<tr><td colspan="7" class="text-center py-16">
+        <div class="flex flex-col items-center gap-3">
+            <i class="ph ph-hard-drives text-4xl text-[#c7c7cc]"></i>
+            <div class="text-sm text-[#86868b] font-semibold">${searchQ || filterS ? 'No matching hardware found' : 'No hardware products yet'}</div>
+            ${!searchQ && !filterS ? '<button onclick="showCreateProductModal(\'hardware\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Hardware</button>' : ''}
+        </div>
+    </td></tr>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PUBLISH / UNPUBLISH (simplified toggle)
+// ═══════════════════════════════════════════════════════════════════
+
+function togglePublish(pid, force = false) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p || !canManageProduct(p)) return;
+
+    if (p.status === 'published') {
+        if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
+            if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `closeModal();togglePublish('${pid}', true)`); return; }
+            removeCompatRefs(pid);
+        }
+        p.status = 'unpublished';
+        p.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Unpublished', p.name);
+        showToast(`${p.name} has been unpublished`, 'info');
+    } else {
+        if (p.product_type === 'software') {
+            const staleIds = (p.compatible_hardware || []).filter(hid => {
+                const hw = PRODUCTS.find(x => x.id === hid);
+                return !hw || hw.status !== 'published';
+            });
+            if (staleIds.length) {
+                if (!force) { showSwPublishConflictModal(pid, staleIds); return; }
+                const staleNames = staleIds.map(hid => PRODUCTS.find(x => x.id === hid)?.name || hid);
+                p.compatible_hardware = p.compatible_hardware.filter(hid => !staleIds.includes(hid));
+                logActivity('Compatibility removed', p.name, `unpublished hardware removed on publish: ${staleNames.join(', ')}`, p.id);
+            }
+        }
+        p.status = 'published';
+        p.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Published', p.name);
+        showToast(`${p.name} is now published!`, 'success');
+    }
+    reRenderCurrentList();
+}
+
+// Confirm modal shown when publishing a SW product that references non-published hardware.
+function showSwPublishConflictModal(pid, staleIds) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    const staleNames = staleIds.map(hid => PRODUCTS.find(x => x.id === hid)?.name || hid);
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fff7ed;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#d97706"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Publish "${esc(p?.name || '')}"?</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 12px;line-height:1.6">This product references unpublished hardware:</p>
+            <div style="font-size:13px;font-weight:600;color:#1d1d1f;margin:0 0 12px;line-height:1.8">${staleNames.map(n => esc(n)).join('<br>')}</div>
+            <p style="font-size:13px;color:#86868b;margin:0 0 24px;line-height:1.6">They will be removed from this product's compatible hardware on publish.</p>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="closeModal();togglePublish('${pid}', true)" class="btn-primary" style="background:#d97706"><i class="ph ph-arrow-line-up"></i> Publish Anyway</button>
+            </div>
+        </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HARDWARE PREVIEW (storefront card modal)
+// ═══════════════════════════════════════════════════════════════════
+
+function showHwPreview(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    const fmt = p.product_format || 'standard';
+    const specs = p.key_specifications || [];
+    const platforms = p.ns_platforms || [];
+    const isAidaptiv = p.is_aidaptiv;
+
+    let specSections = '';
+    if (fmt === 'nonstandard') {
+        if (platforms.length) specSections += `<div class="preview-section"><div class="preview-section-title"><i class="ph ph-cpu" style="color:#7c8ec8"></i> Processor / Platform</div><ul class="hw-spec-list">${platforms.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul></div>`;
+        if (specs.length) specSections += `<div class="preview-section"><div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div><ul class="hw-spec-list">${specs.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul></div>`;
+    } else {
+        if (specs.length) specSections += `<div class="preview-section"><div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div><ul class="hw-spec-list">${specs.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul></div>`;
+    }
+
+    showModal(`
+        <div style="text-align:center;margin-bottom:20px">
+            <div style="display:inline-flex;align-items:center;gap:8px">
+                <span class="format-badge ${fmt === 'standard' ? 'is-standard' : 'is-nonstandard'}"><i class="ph ${fmt === 'standard' ? 'ph-list-bullets' : 'ph-cube'}"></i> ${fmt === 'standard' ? 'Standard' : 'Non-standard'}</span>
+                <span style="font-size:12px;color:#86868b;font-weight:500">Storefront Preview</span>
+            </div>
+        </div>
+        <div class="hw-preview-card" style="max-width:380px;margin:0 auto">
+            <div class="hw-preview-media">
+                ${p.image_data ? `<img src="${p.image_data}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover">` : `<div class="hw-placeholder-icon" aria-hidden="true">
+                    <div class="hw-placeholder-device"></div>
+                    <div class="hw-placeholder-device"></div>
+                </div>`}
+            </div>
+            <div class="hw-preview-body">
+                <h4 class="hw-preview-title">${esc(p.name)}</h4>
+                <div class="hw-preview-category">${esc(p.sub_category || '')}</div>
+                <hr class="hw-preview-divider">
+                ${specSections || '<div style="padding:10px 14px;color:#6d7695;font-size:0.82rem;font-style:italic">No specifications</div>'}
+                ${isAidaptiv ? `<div class="hw-aidaptiv-row">
+                    <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
+                    <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
+                </div>` : ''}
+                <button type="button" class="hw-preview-cta">${fmt === 'standard' ? 'Select Hardware' : 'Next: View Spec'}</button>
+            </div>
+        </div>
+        <div style="margin-top:16px;text-align:center">
+            <button onclick="closeModal()" class="btn-secondary">Close Preview</button>
+        </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SOFTWARE DETAIL
+// ═══════════════════════════════════════════════════════════════════
+
+function showSwDetail(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    const compatHW = (p.compatible_hardware || []).map(hid => PRODUCTS.find(x => x.id === hid)).filter(Boolean);
+    const canEdit = canManageProduct(p);
+
+    const detailRow = (label, value) => `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-light)"><span style="color:#86868b;font-size:13px">${label}</span><span style="font-weight:600;font-size:13px">${value}</span></div>`;
+
+    document.getElementById('sw-detail-content').innerHTML = `
+        <button onclick="navigate('sw-products')" style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#86868b;font-weight:500;margin-bottom:24px;background:none;border:none;cursor:pointer"><i class="ph ph-arrow-left"></i> Back to Software</button>
+
+        <!-- Header -->
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:32px">
+            <div style="display:flex;align-items:center;gap:16px">
+                ${p.icon_data ? `<img src="${p.icon_data}" alt="${esc(p.name)}" style="width:48px;height:48px;border-radius:14px;object-fit:cover;flex-shrink:0">` : `<div style="width:48px;height:48px;border-radius:14px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#86868b">${esc(p.name.slice(0,2).toUpperCase())}</div>`}
+                <div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.03em;margin:0">${esc(p.name)}</h2>
+                        ${statusBadge(p.status)}
+                    </div>
+                    <div style="font-size:13px;color:#86868b;margin-top:3px">${esc(p.vendor_name)} · ${esc(getSwCategories(p).join(', '))}</div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <button onclick="showSwPreview('${p.id}')" class="btn-secondary"><i class="ph ph-eye"></i> Preview</button>
+                ${canEdit ? `<button onclick="showEditProductModal('${p.id}')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
+                ${canEdit && p.status === 'published' ? `<button onclick="confirmUnpublish('${p.id}')" class="btn-secondary" style="color:#d97706"><i class="ph ph-arrow-down"></i> Unpublish</button>` : ''}
+                ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showSwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
+                ${canEdit && p.status !== 'archived' ? `<button onclick="archiveProduct('${p.id}');navigate('sw-products')" class="btn-secondary" style="color:#7c3aed"><i class="ph ph-archive"></i> Archive</button>` : ''}
+                ${canEdit && p.status === 'archived' ? `<button onclick="restoreProduct('${p.id}');showSwDetail('${p.id}')" class="btn-primary" style="background:#059669"><i class="ph ph-arrow-counter-clockwise"></i> Restore</button>` : ''}
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:48px">
+            <!-- Left Column -->
+            <div>
+                <!-- Key Features -->
+                ${p.features?.length ? `
+                <section style="margin-top:32px;margin-bottom:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Key Features</div>
+                    <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px">${p.features.map(f => `<li style="display:flex;align-items:flex-start;gap:10px;font-size:14px;color:#1d1d1f"><span style="width:5px;height:5px;border-radius:50%;background:#1d1d1f;flex-shrink:0;margin-top:8px"></span><span>${esc(f)}</span></li>`).join('')}</ul>
+                </section>
+                <div style="border-top:1px solid var(--border-light)"></div>` : ''}
+
+                <!-- Industries -->
+                ${p.industries?.length ? `
+                <section style="margin-top:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Applicable Industries</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px">${p.industries.map(i => `<span class="badge badge-zinc">${esc(i)}</span>`).join('')}</div>
+                </section>` : ''}
+            </div>
+
+            <!-- Right Column -->
+            <div>
+                <!-- Product Info -->
+                <section style="margin-bottom:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Product Info</div>
+                    ${detailRow('Brand', esc(p.brand))}
+                    ${detailRow('Category', esc(getSwCategories(p).join(', ')))}
+                    ${detailRow('Created', esc(p.created_at))}
+                    ${detailRow('Updated', esc(p.updated_at))}
+                </section>
+                <div style="border-top:1px solid var(--border-light)"></div>
+
+                <!-- Compatible Hardware -->
+                <section style="margin-top:32px;margin-bottom:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px">Compatible Hardware</div>
+                    ${compatHW.length ? `<div style="display:flex;flex-direction:column;gap:10px">${compatHW.map(h => `<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#1d1d1f"><i class="ph ph-hard-drives" style="color:#86868b"></i><span style="font-weight:500">${esc(h.name)}</span></div>`).join('')}</div>` : '<div style="font-size:13px;color:#c7c7cc">No hardware selected</div>'}
+                </section>
+            </div>
+        </div>
+        ${renderProductHistory(p)}
+    `;
+    document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+    document.getElementById('view-sw-detail').classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HARDWARE DETAIL
+// ═══════════════════════════════════════════════════════════════════
+
+function showHwDetail(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    const canEdit = canManageProduct(p);
+
+    const detailRow = (label, value) => `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-light)"><span style="color:#86868b;font-size:13px">${label}</span><span style="font-weight:600;font-size:13px">${value}</span></div>`;
+
+    document.getElementById('hw-detail-content').innerHTML = `
+        <button onclick="navigate('hw-products')" style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:#86868b;font-weight:500;margin-bottom:24px;background:none;border:none;cursor:pointer"><i class="ph ph-arrow-left"></i> Back to Hardware</button>
+
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:32px">
+            <div style="display:flex;align-items:center;gap:16px">
+                ${p.image_data ? `<img src="${p.image_data}" alt="${esc(p.name)}" style="width:48px;height:48px;border-radius:14px;object-fit:cover;flex-shrink:0">` : `<div style="width:48px;height:48px;border-radius:14px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#86868b">${esc(p.name.slice(0,2).toUpperCase())}</div>`}
+                <div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.03em;margin:0">${esc(p.name)}</h2>
+                        ${statusBadge(p.status)}
+                        <span class="format-badge ${(p.product_format||'standard') === 'standard' ? 'is-standard' : 'is-nonstandard'}"><i class="ph ${(p.product_format||'standard') === 'standard' ? 'ph-list-bullets' : 'ph-cube'}"></i> ${(p.product_format||'standard') === 'standard' ? 'Standard' : 'Non-standard'}</span>
+                        ${p.is_aidaptiv ? '<span class="badge badge-green">aiDAPTIV</span>' : ''}
+                    </div>
+                    <div style="font-size:13px;color:#86868b;margin-top:3px">${esc(p.vendor_name || '—')}${p.brand ? ' · ' + esc(p.brand) : ''}${p.model ? ' ' + esc(p.model) : ''}</div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <button onclick="showHwPreview('${p.id}')" class="btn-secondary"><i class="ph ph-eye"></i> Preview</button>
+                ${canEdit ? `<button onclick="showEditProductModal('${p.id}')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
+                ${canEdit && p.status === 'published' ? `<button onclick="confirmUnpublish('${p.id}')" class="btn-secondary" style="color:#d97706"><i class="ph ph-arrow-down"></i> Unpublish</button>` : ''}
+                ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showHwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
+                ${canEdit && p.status !== 'archived' ? `<button onclick="archiveProduct('${p.id}');navigate('hw-products')" class="btn-secondary" style="color:#7c3aed"><i class="ph ph-archive"></i> Archive</button>` : ''}
+                ${canEdit && p.status === 'archived' ? `<button onclick="restoreProduct('${p.id}');showHwDetail('${p.id}')" class="btn-primary" style="background:#059669"><i class="ph ph-arrow-counter-clockwise"></i> Restore</button>` : ''}
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:48px">
+            <div>
+                <section style="margin-bottom:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px">Description</div>
+                    <p style="font-size:14px;color:#1d1d1f;line-height:1.7">${esc(p.short_description)}</p>
+                </section>
+
+                ${(p.product_format || 'standard') !== 'standard' && (p.ns_platforms || []).length ? `
+                <div style="border-top:1px solid var(--border-light)"></div>
+                <section style="margin-top:32px;margin-bottom:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Processor / Platform</div>
+                    <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px">
+                        ${(p.ns_platforms || []).map(s => '<li style="display:flex;align-items:flex-start;gap:10px;font-size:14px;color:#1d1d1f"><span style="width:5px;height:5px;border-radius:50%;background:#1d1d1f;flex-shrink:0;margin-top:8px"></span><span>' + esc(s) + '</span></li>').join('')}
+                    </ul>
+                </section>` : ''}
+
+                ${(p.key_specifications || []).length ? `
+                <div style="border-top:1px solid var(--border-light)"></div>
+                <section style="margin-top:32px;margin-bottom:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Key Specifications</div>
+                    <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px">
+                        ${(p.key_specifications || []).map(s => '<li style="display:flex;align-items:flex-start;gap:10px;font-size:14px;color:#1d1d1f"><span style="width:5px;height:5px;border-radius:50%;background:#1d1d1f;flex-shrink:0;margin-top:8px"></span><span>' + esc(s) + '</span></li>').join('')}
+                    </ul>
+                </section>` : ''}
+
+                ${p.bestFor?.length ? `
+                <div style="border-top:1px solid var(--border-light)"></div>
+                <section style="margin-top:32px">
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Best For</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px">${p.bestFor.map(b => '<span class="badge badge-blue">' + esc(b) + '</span>').join('')}</div>
+                </section>` : ''}
+            </div>
+
+            <div>
+                <section>
+                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Product Info</div>
+                    ${detailRow('Format', '<span class="format-badge ' + ((p.product_format||'standard') === 'standard' ? 'is-standard' : 'is-nonstandard') + '"><i class="ph ' + ((p.product_format||'standard') === 'standard' ? 'ph-list-bullets' : 'ph-cube') + '"></i> ' + ((p.product_format||'standard') === 'standard' ? 'Standard' : 'Non-standard') + '</span>')}
+                    ${(p.product_format || 'standard') === 'standard' ? detailRow('Brand', esc(p.brand)) : ''}
+                    ${(p.product_format || 'standard') === 'standard' ? detailRow('Model', esc(p.model)) : ''}
+                    ${detailRow('Category', esc(p.sub_category))}
+                    ${detailRow('aiDAPTIV', p.is_aidaptiv ? '<span class="badge badge-green">Yes</span>' : 'No')}
+                    ${detailRow('Created', esc(p.created_at))}
+                    ${detailRow('Updated', esc(p.updated_at))}
+                </section>
+            </div>
+        </div>
+        ${renderProductHistory(p)}
+    `;
+    document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+    document.getElementById('view-hw-detail').classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SOFTWARE PREVIEW (front-end card preview)
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Software Preview Drawer (v5 aligned) ──
+let sdBackdrop = null, sdDrawer = null;
+
+function ensurePreviewDrawer() {
+    if (sdBackdrop && sdDrawer) return;
+    sdBackdrop = document.createElement('div');
+    sdBackdrop.className = 'sd-backdrop';
+    sdBackdrop.setAttribute('aria-hidden', 'true');
+    sdBackdrop.addEventListener('click', closeSwPreview);
+    sdDrawer = document.createElement('div');
+    sdDrawer.className = 'sd-drawer';
+    sdDrawer.setAttribute('role', 'dialog');
+    sdDrawer.setAttribute('aria-modal', 'true');
+    sdDrawer.setAttribute('aria-label', 'Software detail preview');
+    document.body.appendChild(sdBackdrop);
+    document.body.appendChild(sdDrawer);
+}
+
+function showSwPreview(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    ensurePreviewDrawer();
+    const compatHW = (p.compatible_hardware || []).map(hid => PRODUCTS.find(x => x.id === hid)).filter(Boolean);
+    const initials = p.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+    const SVG_FEATURES = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;color:#7c8ec8;flex-shrink:0"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>';
+    const SVG_INDUSTRIES = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;color:#7c8ec8;flex-shrink:0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
+
+    const featuresHtml = p.features?.length ? `
+        <section class="sd-meta-block">
+            <div class="sd-meta-title">${SVG_FEATURES} Key Features</div>
+            <ul class="sd-feature-list">${p.features.map(f =>
+                `<li class="sd-feature-item"><span class="sd-feature-dot"></span><span>${esc(f)}</span></li>`
+            ).join('')}</ul>
+        </section>` : '';
+
+    const industriesHtml = p.industries?.length ? `
+        <section class="sd-meta-block">
+            <div class="sd-meta-title">${SVG_INDUSTRIES} Applicable Industries</div>
+            <div class="sd-industry-list">${p.industries.map(i =>
+                `<span class="sd-industry-chip">${esc(i)}</span>`
+            ).join('')}</div>
+        </section>` : '';
+
+    const savedPhotos = (p.photos_data || []).filter(Boolean);
+    savedSwGallery = { photos: savedPhotos, index: 0 };
+    const galleryHtml = savedPhotos.length ? `
+        <div>
+            <div class="sd-gallery">
+                <img class="sd-gallery-img" id="sd-saved-gallery-img" src="${savedPhotos[0]}" alt="${esc(p.name)}">
+                ${savedPhotos.length > 1 ? `<span class="sd-gallery-nav prev" onclick="slideSavedSwGallery(-1)"><i class="ph ph-caret-left"></i></span>
+                <span class="sd-gallery-nav next" onclick="slideSavedSwGallery(1)"><i class="ph ph-caret-right"></i></span>` : ''}
+            </div>
+            ${savedPhotos.length > 1 ? `<div class="sd-gallery-dots" id="sd-saved-gallery-dots">${savedPhotos.map((_, i) => `<span class="sd-gallery-dot${i === 0 ? ' active' : ''}"></span>`).join('')}</div>` : ''}
+        </div>` : '';
+
+    const isBundled = p.sw_category === 'included';
+    let actionHtml;
+    if (isBundled) {
+        actionHtml = `
+            <button class="sd-action-primary" style="background:rgba(20,46,123,0.08);color:#1d2e7b;box-shadow:none;font-weight:700">Included</button>
+            <p class="sd-action-helper">This software is bundled automatically with compatible hardware.</p>`;
+    } else {
+        actionHtml = `
+            <button class="sd-action-primary">Select Add-on</button>
+            <span class="sd-quote-link">Request a custom quote for this add-on</span>`;
+    }
+
+    sdDrawer.innerHTML = `
+        <button class="sd-close" type="button" onclick="closeSwPreview()" aria-label="Close preview">&times;</button>
+        <div class="sd-body">
+            <div class="sd-hero">
+                <div class="sd-hero-header">
+                    <div class="sd-mark">${p.icon_data ? `<img src="${p.icon_data}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:20px">` : esc(initials)}</div>
+                    <div>
+                        <p class="sd-company">${esc(p.vendor_name)}</p>
+                        <h2 class="sd-name">${esc(p.name)}</h2>
+                    </div>
+                </div>
+                <p class="sd-tagline">${esc(p.tagline || getSwCategories(p).join(', '))}</p>
+            </div>
+            <div class="sd-content">
+                ${featuresHtml}
+                ${galleryHtml}
+                ${industriesHtml}
+            </div>
+        </div>
+        <div class="sd-action-footer">
+            ${actionHtml}
+        </div>`;
+
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => {
+        sdBackdrop.classList.add('is-open');
+        sdDrawer.classList.add('is-open');
+    });
+}
+
+let savedSwGallery = { photos: [], index: 0 };
+
+function slideSavedSwGallery(dir) {
+    const total = savedSwGallery.photos.length;
+    if (total <= 1) return;
+    savedSwGallery.index = (savedSwGallery.index + dir + total) % total;
+    const img = document.getElementById('sd-saved-gallery-img');
+    if (img) img.src = savedSwGallery.photos[savedSwGallery.index];
+    document.querySelectorAll('#sd-saved-gallery-dots .sd-gallery-dot').forEach((d, i) => d.classList.toggle('active', i === savedSwGallery.index));
+}
+
+function closeSwPreview() {
+    if (!sdBackdrop || !sdDrawer) return;
+    sdBackdrop.classList.remove('is-open');
+    sdDrawer.classList.remove('is-open');
+    document.body.style.overflow = '';
+    setTimeout(() => { if (sdDrawer) sdDrawer.innerHTML = ''; }, 340);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CREATE / EDIT PRODUCT MODAL
+// ═══════════════════════════════════════════════════════════════════
+
+function createField(id, label, opts = {}) {
+    const required = opts.required ? ' <span class="req">*</span>' : '';
+    const max = opts.maxlength ? ` maxlength="${opts.maxlength}"` : '';
+    const placeholder = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
+    const type = opts.type || 'text';
+    const value = opts.value ? ` value="${esc(opts.value)}"` : '';
+    return `<div class="${opts.wrapClass || ''}">
+        <label for="${id}" class="field-label">${label}${required}</label>
+        <input id="${id}" type="${type}" class="input-field" ${opts.required ? 'required' : ''}${max}${placeholder}${value}>
+        ${opts.hint ? `<div class="field-hint">${esc(opts.hint)}</div>` : ''}
+        <div id="${id}-error" class="field-error-text"></div>
+    </div>`;
+}
+
+function createTextArea(id, label, opts = {}) {
+    const required = opts.required ? ' <span class="req">*</span>' : '';
+    const max = opts.maxlength ? ` maxlength="${opts.maxlength}"` : '';
+    const placeholder = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
+    return `<div class="${opts.wrapClass || ''}">
+        <label for="${id}" class="field-label">${label}${required}</label>
+        <textarea id="${id}" rows="${opts.rows || 3}" class="input-field" ${opts.required ? 'required' : ''}${max}${placeholder}></textarea>
+        ${opts.hint ? `<div class="field-hint">${esc(opts.hint)}</div>` : ''}
+        <div id="${id}-error" class="field-error-text"></div>
+    </div>`;
+}
+
+function createFormSection(icon, title, subtitle, body) {
+    return `<section class="form-section">
+        <div class="form-section-head">
+            <div>
+                <div class="form-section-title"><i class="ph ${esc(icon)}"></i><span>${esc(title)}</span></div>
+                ${subtitle ? `<div class="form-section-subtitle">${esc(subtitle)}</div>` : ''}
+            </div>
+        </div>
+        <div class="form-section-body">${body}</div>
+    </section>`;
+}
+
+function setCreateError(id, message = '') {
+    const el = document.getElementById(id);
+    const err = document.getElementById(`${id}-error`);
+    if (el) el.classList.toggle('field-error', !!message);
+    if (err) err.textContent = message;
+}
+
+function valueOf(id) {
+    return document.getElementById(id)?.value?.trim() || '';
+}
+
+function isValidProductImageFile(file) {
+    if (!file) return false;
+    const nameOk = /\.(jpe?g|png)$/i.test(file.name || '');
+    const typeOk = !file.type || ['image/jpeg', 'image/jpg', 'image/png'].includes(file.type);
+    return nameOk && typeOk && Number(file.size || 0) <= PRODUCT_IMAGE_MAX_BYTES;
+}
+
+function getMatchingVendorId(vendorName, vendorType) {
+    const target = String(vendorName || '').trim().toLowerCase();
+    const org = ORGS.find(o => o.type === 'vendor' && o.vendor_type === vendorType && o.name.toLowerCase() === target)
+        || ORGS.find(o => o.type === 'vendor' && o.vendor_type === vendorType);
+    return org?.id || `v-${vendorType}-draft`;
+}
+
+function renderHardwareSpecInputs() {
+    return Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => `
+        <div class="flex items-center gap-3">
+            <div class="w-6 text-right text-xs font-bold text-[#86868b]">${i + 1}</div>
+            <div class="relative flex-1">
+                <input id="new-p-spec-${i}" class="input-field pr-14" maxlength="${HW_KEY_SPEC_MAX_CHARS}" placeholder="${i < HW_KEY_SPEC_MIN_ITEMS ? 'Required' : 'Optional'}">
+                <span id="new-p-spec-${i}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">0/${HW_KEY_SPEC_MAX_CHARS}</span>
+            </div>
+        </div>`).join('');
+}
+
+function renderSoftwareFeatureInputs() {
+    return Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => `
+        <div class="relative">
+            <input id="new-p-feature-${i}" class="input-field pr-16" maxlength="${SOFTWARE_FEATURE_MAX_CHARS}" placeholder="Feature ${i + 1}">
+            <span id="new-p-feature-${i}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">0/${SOFTWARE_FEATURE_MAX_CHARS}</span>
+        </div>`).join('');
+}
+
+function collectHardwareSpecs() {
+    return Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => valueOf(`new-p-spec-${i}`)).filter(Boolean);
+}
+
+function collectSoftwareFeatures() {
+    return Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => valueOf(`new-p-feature-${i}`)).filter(Boolean);
+}
+
+function getCheckedValues(containerId) {
+    return Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)).map(el => el.value);
+}
+
+const SW_CATEGORY_MAX = 3;
+
+function renderSwCategoryChecks(containerId, checkedValues = []) {
+    const labels = SOFTWARE_CATEGORY_OPTIONS.filter(o => o.is_active).map(o => o.label);
+    // Keep currently-assigned categories visible even if no longer an active option
+    checkedValues.forEach(v => { if (!labels.includes(v)) labels.push(v); });
+    return `<div id="${containerId}" class="flex flex-wrap gap-2">
+        ${labels.map(l => `<label class="preview-pill cursor-pointer"><input type="checkbox" value="${esc(l)}" class="mr-2 accent-aiso" ${checkedValues.includes(l) ? 'checked' : ''} onchange="updateSwCategoryLimit('${containerId}')">${esc(l)}</label>`).join('')}
+    </div>
+    <div id="${containerId}-count" class="field-hint">${checkedValues.length}/${SW_CATEGORY_MAX} selected</div>
+    <div id="${containerId}-error" class="field-error-text"></div>`;
+}
+
+function updateSwCategoryLimit(containerId) {
+    const boxes = Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]`));
+    const checked = boxes.filter(b => b.checked).length;
+    boxes.forEach(b => { b.disabled = !b.checked && checked >= SW_CATEGORY_MAX; });
+    const counter = document.getElementById(`${containerId}-count`);
+    if (counter) counter.textContent = `${checked}/${SW_CATEGORY_MAX} selected`;
+}
+
+function updateCharCounter(inputId) {
+    const el = document.getElementById(inputId);
+    const counter = document.getElementById(`${inputId}-count`);
+    if (el && counter) counter.textContent = `${el.value.length}/${el.maxLength}`;
+}
+
+// Non-standard rows get reindexed (ids change on row removal), so locate the
+// counter as a sibling via class instead of by id.
+function updateNsCharCount(el) {
+    if (!el) return;
+    const counter = el.parentElement.querySelector('.ns-char-count');
+    if (counter) counter.textContent = `${el.value.length}/${el.maxLength}`;
+}
+
+// Markup for one non-standard Platform / Key Spec row, with a visible char counter.
+function nsRowHtml(id, placeholder, value, onCounter, onPreview) {
+    const v = value || '';
+    return `<div class="ns-row flex items-center gap-2">
+        <div class="relative flex-1">
+            <input id="${id}" type="text" maxlength="${HW_KEY_SPEC_MAX_CHARS}" class="input-field pr-14 w-full" value="${esc(v)}" placeholder="${placeholder}" oninput="updateNsCharCount(this);${onCounter};${onPreview}">
+            <span class="ns-char-count absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">${v.length}/${HW_KEY_SPEC_MAX_CHARS}</span>
+        </div>
+        <button type="button" class="btn-ghost" style="padding:4px 6px;flex-shrink:0" onclick="this.closest('.ns-row').remove();reindexNsRows('${id.replace(/-\d+$/, '')}');${onCounter};${onPreview}"><i class="ph ph-x" style="font-size:12px"></i></button>
+    </div>`;
+}
+
+function getProductInitials(name) {
+    const text = String(name || '').trim();
+    if (!text) return 'OE';
+    return text.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function renderImageStatus(type) {
+    const target = document.getElementById(type === 'hardware' ? 'hardware-image-status' : 'software-image-status');
+    if (!target) return;
+    if (type === 'hardware') {
+        const img = createProductState.hardwareImage;
+        target.innerHTML = img ? `
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-[#e8eaed] bg-[#f5f5f7] px-3 py-2.5">
+                <span class="image-chip"><i class="ph ph-image"></i><span class="truncate">${esc(img.name)}</span></span>
+                <button type="button" class="btn-ghost py-1 px-2" onclick="removeHardwareImage()"><i class="ph ph-trash"></i> Delete</button>
+            </div>` : '';
+        return;
+    }
+    const imgs = createProductState.softwareImages;
+    target.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] text-[#86868b] font-bold">${imgs.length}/5 images</span>
+            ${imgs.length ? '<button type="button" class="btn-ghost py-1 px-2" onclick="clearSoftwareImages()"><i class="ph ph-trash"></i> Delete all</button>' : ''}
+        </div>
+        <div class="flex flex-wrap gap-2">
+            ${imgs.map((img, idx) => `<span class="image-chip"><i class="ph ph-image"></i><span class="truncate max-w-[150px]">${esc(img.name)}</span><button type="button" class="text-aiso" onclick="removeSoftwareImage(${idx})"><i class="ph ph-x"></i></button></span>`).join('')}
+        </div>`;
+}
+
+function handleHardwareImageUpload(input) {
+    const file = input.files?.[0];
+    setCreateError('new-p-image', '');
+    if (!file) {
+        createProductState.hardwareImage = null;
+        renderImageStatus('hardware');
+        renderCreateProductPreview('hardware');
+        return;
+    }
+    if (!isValidProductImageFile(file)) {
+        input.value = '';
+        createProductState.hardwareImage = null;
+        setCreateError('new-p-image', PRODUCT_IMAGE_ERROR);
+        renderImageStatus('hardware');
+        renderCreateProductPreview('hardware');
+        return;
+    }
+    createProductState.hardwareImage = { file, name: file.name, url: URL.createObjectURL(file) };
+    const hwImgObj = createProductState.hardwareImage;
+    Store.compressImage(file).then(d => { hwImgObj.dataUrl = d; }).catch(() => {});
+    renderImageStatus('hardware');
+    renderCreateProductPreview('hardware');
+}
+
+function removeHardwareImage() {
+    createProductState.hardwareImage = null;
+    const input = document.getElementById('new-p-image');
+    if (input) input.value = '';
+    renderImageStatus('hardware');
+    renderCreateProductPreview('hardware');
+}
+
+function handleSoftwareIconUpload(input) {
+    const file = input.files?.[0];
+    setCreateError('new-p-icon', '');
+    if (!file) {
+        createProductState.softwareIcon = null;
+        renderIconStatus();
+        renderCreateProductPreview('software');
+        return;
+    }
+    if (!isValidProductImageFile(file)) {
+        input.value = '';
+        createProductState.softwareIcon = null;
+        setCreateError('new-p-icon', PRODUCT_IMAGE_ERROR);
+        renderIconStatus();
+        renderCreateProductPreview('software');
+        return;
+    }
+    createProductState.softwareIcon = { file, name: file.name, url: URL.createObjectURL(file) };
+    const swIconObj = createProductState.softwareIcon;
+    Store.compressImage(file).then(d => { swIconObj.dataUrl = d; }).catch(() => {});
+    renderIconStatus();
+    renderCreateProductPreview('software');
+}
+
+function removeSoftwareIcon() {
+    createProductState.softwareIcon = null;
+    const input = document.getElementById('new-p-icon');
+    if (input) input.value = '';
+    renderIconStatus();
+    renderCreateProductPreview('software');
+}
+
+function renderIconStatus() {
+    const target = document.getElementById('software-icon-status');
+    if (!target) return;
+    const icon = createProductState.softwareIcon;
+    target.innerHTML = icon ? `
+        <div class="flex items-center justify-between gap-3 rounded-xl border border-[#e8eaed] bg-[#f5f5f7] px-3 py-2.5">
+            <span class="image-chip"><img src="${esc(icon.url)}" style="width:20px;height:20px;border-radius:5px;object-fit:cover"><span class="truncate">${esc(icon.name)}</span></span>
+            <button type="button" class="btn-ghost py-1 px-2" onclick="removeSoftwareIcon()"><i class="ph ph-trash"></i> Remove</button>
+        </div>` : '';
+}
+
+function handleSoftwareImageUpload(input) {
+    const files = Array.from(input.files || []);
+    setCreateError('new-p-images', '');
+    if (!files.length) return;
+    if (files.some(file => !isValidProductImageFile(file))) {
+        input.value = '';
+        setCreateError('new-p-images', PRODUCT_IMAGE_ERROR);
+        return;
+    }
+    const remaining = 5 - createProductState.softwareImages.length;
+    if (remaining <= 0 || files.length > remaining) {
+        input.value = '';
+        setCreateError('new-p-images', 'Maximum 5 images.');
+        return;
+    }
+    createProductState.softwareImages.push(...files.slice(0, remaining).map(file => {
+        const obj = { file, name: file.name, url: URL.createObjectURL(file) };
+        Store.compressImage(file).then(d => { obj.dataUrl = d; }).catch(() => {});
+        return obj;
+    }));
+    input.value = '';
+    renderImageStatus('software');
+    renderCreateProductPreview('software');
+}
+
+function removeSoftwareImage(index) {
+    createProductState.softwareImages.splice(index, 1);
+    renderImageStatus('software');
+    renderCreateProductPreview('software');
+}
+
+function clearSoftwareImages() {
+    createProductState.softwareImages = [];
+    renderImageStatus('software');
+    renderCreateProductPreview('software');
+}
+
+const HW_NS_MAX_ITEMS = 8; // Platform + Key Specs combined max
+
+function getHwFormat() {
+    return document.querySelector('input[name="hw-format"]:checked')?.value || 'standard';
+}
+
+function switchHwFormat(fmt) {
+    document.querySelectorAll('#hw-format-selector label').forEach(l => l.classList.remove('is-active'));
+    const radio = document.getElementById('hw-format-' + fmt);
+    if (radio) { radio.checked = true; radio.nextElementSibling?.classList.add('is-active'); }
+    const stdSection = document.getElementById('hw-standard-section');
+    const nsSection = document.getElementById('hw-nonstandard-section');
+    const vendorBlock = document.getElementById('new-p-vendor-block');
+    if (fmt === 'nonstandard') {
+        if (stdSection) stdSection.style.display = 'none';
+        if (nsSection) nsSection.style.display = '';
+        if (vendorBlock) { vendorBlock.style.display = 'none'; setCreateError('new-p-vendor', ''); }
+    } else {
+        if (stdSection) stdSection.style.display = '';
+        if (nsSection) nsSection.style.display = 'none';
+        if (vendorBlock) vendorBlock.style.display = '';
+    }
+    renderHardwareCreatePreview();
+}
+
+function getNsItemCount(prefix) {
+    let count = 0;
+    for (let i = 0; i < HW_NS_MAX_ITEMS; i++) {
+        const el = document.getElementById(`${prefix}-${i}`);
+        if (el && el.value.trim()) count++;
+    }
+    return count;
+}
+
+function updateNsCounter() {
+    const pCount = getNsItemCount('new-p-platform');
+    const sCount = getNsItemCount('new-p-nsspec');
+    const total = pCount + sCount;
+    const el = document.getElementById('ns-item-counter');
+    if (el) {
+        el.textContent = `${total} / ${HW_NS_MAX_ITEMS} items used`;
+        el.style.color = total >= HW_NS_MAX_ITEMS ? '#ff3b30' : '#86868b';
+    }
+}
+
+function addNsRow(section) {
+    const prefix = section === 'platform' ? 'new-p-platform' : 'new-p-nsspec';
+    const container = document.getElementById(prefix + '-list');
+    if (!container) return;
+    const totalRows = (document.getElementById('new-p-platform-list')?.querySelectorAll('.ns-row').length || 0)
+                    + (document.getElementById('new-p-nsspec-list')?.querySelectorAll('.ns-row').length || 0);
+    if (totalRows >= HW_NS_MAX_ITEMS) { showToast(`Combined max ${HW_NS_MAX_ITEMS} items reached`, 'error'); return; }
+    const existing = container.querySelectorAll('.ns-row').length;
+    const idx = existing;
+    const ph = section === 'platform' ? 'NVIDIA RTX A6000' : 'Max. GPU x8';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = nsRowHtml(`${prefix}-${idx}`, `e.g. ${ph}`, '', 'updateNsCounter()', 'renderHardwareCreatePreview()');
+    container.appendChild(tmp.firstElementChild);
+    updateNsCounter();
+}
+
+function reindexNsRows(prefix) {
+    const container = document.getElementById(prefix + '-list');
+    if (!container) return;
+    container.querySelectorAll('.ns-row input').forEach((inp, i) => { inp.id = `${prefix}-${i}`; });
+}
+
+function collectNsItems(prefix) {
+    const items = [];
+    for (let i = 0; i < HW_NS_MAX_ITEMS; i++) {
+        const el = document.getElementById(`${prefix}-${i}`);
+        if (el && el.value.trim()) items.push(el.value.trim());
+    }
+    return items;
+}
+
+/* ── Edit modal non-standard helpers ── */
+function addEditNsRow(section) {
+    const prefix = section === 'platform' ? 'edit-p-platform' : 'edit-p-nsspec';
+    const container = document.getElementById(prefix + '-list');
+    if (!container) return;
+    const totalRows = (document.getElementById('edit-p-platform-list')?.querySelectorAll('.ns-row').length || 0)
+                    + (document.getElementById('edit-p-nsspec-list')?.querySelectorAll('.ns-row').length || 0);
+    if (totalRows >= HW_NS_MAX_ITEMS) { showToast(`Combined max ${HW_NS_MAX_ITEMS} items reached`, 'error'); return; }
+    const existing = container.querySelectorAll('.ns-row').length;
+    const idx = existing;
+    const ph = section === 'platform' ? 'NVIDIA RTX A6000' : 'Max. GPU x8';
+    const tmp = document.createElement('div');
+    tmp.innerHTML = nsRowHtml(`${prefix}-${idx}`, `e.g. ${ph}`, '', 'updateEditNsCounter()', "renderEditPreview('hardware')");
+    container.appendChild(tmp.firstElementChild);
+    updateEditNsCounter();
+}
+
+function updateEditNsCounter() {
+    const pCount = getNsItemCount('edit-p-platform');
+    const sCount = getNsItemCount('edit-p-nsspec');
+    const total = pCount + sCount;
+    const el = document.getElementById('edit-ns-item-counter');
+    if (el) {
+        el.textContent = `${total} / ${HW_NS_MAX_ITEMS} items used`;
+        el.style.color = total >= HW_NS_MAX_ITEMS ? '#ff3b30' : '#86868b';
+    }
+}
+
+function renderHardwareCreatePreview() {
+    const fmt = getHwFormat();
+    const name = valueOf('new-p-name') || 'Product Name';
+    const category = valueOf('new-p-product-type');
+    const isAidaptiv = document.getElementById('new-p-aidaptiv')?.checked || false;
+    const image = createProductState.hardwareImage;
+    const target = document.getElementById('create-live-preview');
+    if (!target) return;
+
+    if (fmt === 'nonstandard') {
+        const platforms = collectNsItems('new-p-platform');
+        const nsSpecs = collectNsItems('new-p-nsspec');
+        target.innerHTML = `
+            <div class="preview-eyebrow"><span class="preview-eyebrow-left"><i class="ph ph-eye"></i> Live Preview</span><span class="format-badge is-nonstandard"><i class="ph ph-cube"></i> Non-standard</span></div>
+            <div class="hw-preview-card">
+                <div class="hw-preview-media">
+                    ${image ? `<img src="${esc(image.url)}" alt="${esc(image.name)}">` : `<div class="hw-placeholder-icon" aria-hidden="true">
+                        <div class="hw-placeholder-device"></div>
+                        <div class="hw-placeholder-device"></div>
+                        <div style="margin-top:10px;font-size:0.82rem;font-weight:500;color:#9aa6bf">Upload a product image</div>
+                    </div>`}
+                </div>
+                <div class="hw-preview-body">
+                    <h4 class="hw-preview-title">${esc(name)}</h4>
+                    <div class="hw-preview-category">${esc(category || 'Product Type')}</div>
+                    <hr class="hw-preview-divider">
+                    ${platforms.length ? `<div class="preview-section">
+                        <div class="preview-section-title"><i class="ph ph-cpu" style="color:#7c8ec8"></i> Processor / Platform</div>
+                        <ul class="hw-spec-list">${platforms.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul>
+                    </div>` : ''}
+                    ${nsSpecs.length ? `<div class="preview-section">
+                        <div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div>
+                        <ul class="hw-spec-list">${nsSpecs.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul>
+                    </div>` : ''}
+                    ${!platforms.length && !nsSpecs.length ? '<div style="padding:10px 14px;color:#6d7695;font-size:0.82rem;font-style:italic">Add platform or spec items...</div>' : ''}
+                    ${isAidaptiv ? `<div class="hw-aidaptiv-row">
+                        <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
+                        <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
+                    </div>` : ''}
+                    <button type="button" class="hw-preview-cta">Next: View Spec</button>
+                </div>
+            </div>
+            <div style="margin-top:10px;text-align:center;font-size:0.62rem;color:#86868b;font-style:italic">Non-standard storefront card preview</div>`;
+        return;
+    }
+
+    // Standard preview: structured spec card
+    const specs = collectHardwareSpecs();
+    const imagePrompt = name === 'Product Name'
+        ? '[ Product image ]'
+        : `[ Please place ${name}${category ? ' ' + category : ''} image here ]`;
+    target.innerHTML = `
+        <div class="preview-eyebrow"><span class="preview-eyebrow-left"><i class="ph ph-eye"></i> Live Preview</span><span class="format-badge is-standard"><i class="ph ph-list-bullets"></i> Standard</span></div>
+        <div class="hw-preview-card">
+            <div class="hw-preview-media">
+                ${image ? `<img src="${esc(image.url)}" alt="${esc(image.name)}">` : `<div class="hw-placeholder-icon" aria-hidden="true">
+                    <div class="hw-placeholder-device"></div>
+                    <div class="hw-placeholder-device"></div>
+                    <div style="margin-top:10px;font-size:0.88rem;font-weight:500;line-height:1.4">${esc(imagePrompt)}</div>
+                </div>`}
+            </div>
+            <div class="hw-preview-body">
+                <h4 class="hw-preview-title">${esc(name)}</h4>
+                <div class="hw-preview-category">${esc(category || 'Product Type')}</div>
+                <hr class="hw-preview-divider">
+                <div class="preview-section">
+                    <div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div>
+                    ${specs.length ? `<ul class="hw-spec-list">${specs.map(s => `<li><span>${esc(s)}</span></li>`).join('')}</ul>` : '<div style="padding:10px 14px 12px;color:#6d7695;font-size:0.82rem;font-style:italic">Fill in key specifications...</div>'}
+                </div>
+                ${isAidaptiv ? `<div class="hw-aidaptiv-row">
+                    <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
+                    <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
+                </div>` : ''}
+                <button type="button" class="hw-preview-cta">Select Hardware</button>
+            </div>
+        </div>
+        <div style="margin-top:10px;text-align:center;font-size:0.62rem;color:#86868b;font-style:italic">Standard storefront card preview</div>`;
+}
+
+let previewGalleryIndex = 0;
+
+function renderPreviewGallery(images) {
+    if (!images || images.length === 0) {
+        return `<div class="sd-gallery"><div class="sd-gallery-placeholder"><i class="ph ph-image" style="font-size:2.2rem;opacity:0.45"></i></div>
+            <span class="sd-gallery-nav prev"><i class="ph ph-caret-left"></i></span>
+            <span class="sd-gallery-nav next"><i class="ph ph-caret-right"></i></span></div>`;
+    }
+    if (previewGalleryIndex >= images.length) previewGalleryIndex = 0;
+    const img = images[previewGalleryIndex];
+    const dots = images.length > 1
+        ? `<div class="sd-gallery-dots">${images.map((_, i) => `<span class="sd-gallery-dot${i === previewGalleryIndex ? ' active' : ''}"></span>`).join('')}</div>`
+        : '';
+    return `<div>
+        <div class="sd-gallery">
+            <img class="sd-gallery-img" src="${esc(img.url)}" alt="${esc(img.name)}">
+            ${images.length > 1 ? `<span class="sd-gallery-nav prev" onclick="slidePreviewGallery(-1)"><i class="ph ph-caret-left"></i></span>
+            <span class="sd-gallery-nav next" onclick="slidePreviewGallery(1)"><i class="ph ph-caret-right"></i></span>` : ''}
+        </div>${dots}</div>`;
+}
+
+function slidePreviewGallery(dir) {
+    const total = createProductState.softwareImages.length;
+    if (total <= 1) return;
+    previewGalleryIndex = (previewGalleryIndex + dir + total) % total;
+    renderSoftwareCreatePreview();
+}
+
+function renderSoftwareCreatePreview() {
+    const name = valueOf('new-p-name');
+    const vendor = valueOf('new-p-vendor');
+    const pitch = valueOf('new-p-pitch');
+    const features = collectSoftwareFeatures();
+    const industries = getCheckedValues('new-p-industries');
+    const images = createProductState.softwareImages;
+    const icon = createProductState.softwareIcon;
+    const initials = name ? getProductInitials(name) : '';
+    const target = document.getElementById('create-live-preview');
+    if (!target) return;
+
+    const SVG_FEATURES = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;color:#7c8ec8;flex-shrink:0"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>';
+    const SVG_INDUSTRIES = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;color:#7c8ec8;flex-shrink:0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
+    const PLACEHOLDER_STYLE = 'color:#9aa6bf';
+
+    const featuresHtml = features.length
+        ? `<ul class="sd-feature-list">${features.map(f => `<li class="sd-feature-item"><span class="sd-feature-dot"></span><span>${esc(f)}</span></li>`).join('')}</ul>`
+        : `<div style="padding:12px 14px;${PLACEHOLDER_STYLE};font-size:0.82rem">Add up to 5 key features...</div>`;
+
+    const industriesHtml = industries.length
+        ? `<div class="sd-industry-list">${industries.map(i => `<span class="sd-industry-chip">${esc(i)}</span>`).join('')}</div>`
+        : `<div style="padding:12px 14px;${PLACEHOLDER_STYLE};font-size:0.82rem">Select applicable industries...</div>`;
+
+    const markContent = icon
+        ? `<img src="${esc(icon.url)}" alt="${esc(icon.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:20px">`
+        : initials
+            ? esc(initials)
+            : '<i class="ph ph-package" style="font-size:1.4rem;opacity:0.5"></i>';
+
+    target.innerHTML = `
+        <div class="sw-preview-eyebrow"><i class="ph ph-eye" style="font-size:0.8rem"></i> Live Preview</div>
+        <div class="software-live-preview">
+            <div class="sd-hero" style="position:relative;padding-top:28px">
+                <div class="sd-hero-header">
+                    <div class="sd-mark">${markContent}</div>
+                    <div style="min-width:0;flex:1">
+                        <p class="sd-company">${vendor ? esc(vendor) : `<span style="${PLACEHOLDER_STYLE}">Company Name</span>`}</p>
+                        <h2 class="sd-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name ? esc(name) : `<span style="${PLACEHOLDER_STYLE};font-weight:500">Product Name</span>`}</h2>
+                    </div>
+                </div>
+                <p class="sd-tagline">${pitch ? esc(pitch) : `<span style="${PLACEHOLDER_STYLE}">Short product description...</span>`}</p>
+            </div>
+            <div class="sd-content">
+                <section class="sd-meta-block">
+                    <div class="sd-meta-title">${SVG_FEATURES} Key Features</div>
+                    ${featuresHtml}
+                </section>
+                ${renderPreviewGallery(images)}
+                <section class="sd-meta-block">
+                    <div class="sd-meta-title">${SVG_INDUSTRIES} Applicable Industries</div>
+                    ${industriesHtml}
+                </section>
+            </div>
+            <div class="sd-action-footer" style="margin-top:auto">
+                <button class="sd-action-primary" type="button">Select Add-on</button>
+                <span class="sd-quote-link">Request a custom quote for this add-on</span>
+            </div>
+        </div>`;
+}
+
+function renderCreateProductPreview(type) {
+    if (type === 'software') renderSoftwareCreatePreview();
+    else renderHardwareCreatePreview();
+}
+
+function setupCreateProductBindings(type) {
+    const form = document.getElementById('create-product-form');
+    if (!form) return;
+    const rerender = () => renderCreateProductPreview(type);
+    form.querySelectorAll('input, textarea, select').forEach(el => {
+        el.addEventListener('input', () => {
+            setCreateError(el.id, '');
+            if (el.id.startsWith('new-p-spec-')) {
+                const idx = el.id.replace('new-p-spec-', '');
+                const cnt = document.getElementById(`new-p-spec-${idx}-count`);
+                if (cnt) cnt.textContent = `${el.value.length}/${HW_KEY_SPEC_MAX_CHARS}`;
+            }
+            if (el.id.startsWith('new-p-feature-')) {
+                const idx = el.id.replace('new-p-feature-', '');
+                const cnt = document.getElementById(`new-p-feature-${idx}-count`);
+                if (cnt) cnt.textContent = `${el.value.length}/${SOFTWARE_FEATURE_MAX_CHARS}`;
+            }
+            if (el.id === 'new-p-pitch') updateCharCounter('new-p-pitch');
+            rerender();
+        });
+        el.addEventListener('change', () => {
+            setCreateError(el.id, '');
+            rerender();
+        });
+    });
+    renderImageStatus(type);
+    rerender();
+}
+
+function validateRequiredField(id, message = 'This field is required.') {
+    const ok = !!valueOf(id);
+    setCreateError(id, ok ? '' : message);
+    return ok;
+}
+
+function validateCreateProductForm(type) {
+    let ok = true;
+    ok = validateRequiredField('new-p-name') && ok;
+    if (!(type === 'hardware' && getHwFormat() === 'nonstandard')) {
+        ok = validateRequiredField('new-p-vendor') && ok;
+    }
+    if (type === 'hardware') {
+        const fmt = getHwFormat();
+        ok = validateRequiredField('new-p-product-type') && ok;
+        if (fmt === 'standard') {
+            ok = validateRequiredField('new-p-brand') && ok;
+            ok = validateRequiredField('new-p-model') && ok;
+            const specs = collectHardwareSpecs();
+            if (specs.length < HW_KEY_SPEC_MIN_ITEMS) {
+                setCreateError('new-p-specs', `At least ${HW_KEY_SPEC_MIN_ITEMS} Key Specifications are required.`);
+                ok = false;
+            } else {
+                setCreateError('new-p-specs', '');
+            }
+        } else {
+            // Non-standard: at least 1 item in either platform or specs
+            const platforms = collectNsItems('new-p-platform');
+            const nsSpecs = collectNsItems('new-p-nsspec');
+            if (platforms.length + nsSpecs.length === 0) {
+                setCreateError('new-p-ns', 'At least 1 item in Processor/Platform or Key Specifications is required.');
+                ok = false;
+            } else {
+                setCreateError('new-p-ns', '');
+            }
+        }
+        if (!createProductState.hardwareImage) {
+            setCreateError('new-p-image', PRODUCT_IMAGE_ERROR);
+            ok = false;
+        }
+    } else {
+        // Software: at least 1 category required
+        const categories = getCheckedValues('new-p-categories');
+        if (!categories.length) {
+            setCreateError('new-p-categories', 'Select at least 1 category.');
+            ok = false;
+        } else {
+            setCreateError('new-p-categories', '');
+        }
+        // Software: at least 1 feature recommended
+        const features = collectSoftwareFeatures();
+        if (features.length < 1) {
+            setCreateError('new-p-feature-0', 'At least 1 Key Feature is recommended.');
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+function showCreateProductModal(type) {
+    const isSW = type === 'software';
+    createProductState = { type, hardwareImage: null, softwareIcon: null, softwareImages: [] };
+    const title = isSW ? 'Create Software Product Draft' : 'Create Hardware Product Draft';
+    const vendorOptions = ORGS.filter(o => o.type === 'vendor' && o.vendor_type === type).map(o => `<option value="${esc(o.name)}"></option>`).join('');
+    const hardwareOptions = HARDWARE_PRODUCT_TYPES
+        .filter(item => item.is_active)
+        .map(item => `<option value="${esc(item.label)}">${esc(item.label)}</option>`)
+        .join('');
+    const allHW = PRODUCTS.filter(p => p.product_type === 'hardware' && p.status === 'published');
+
+    const hardwareFields = `
+        ${createFormSection('ph-layout', 'Product Format', 'Choose the storefront display format. This cannot be changed after creation.', `
+            <div class="format-selector" id="hw-format-selector">
+                <input type="radio" name="hw-format" id="hw-format-standard" value="standard" checked>
+                <label for="hw-format-standard" class="is-active" onclick="switchHwFormat('standard')"><i class="ph ph-list-bullets"></i> Standard</label>
+                <input type="radio" name="hw-format" id="hw-format-nonstandard" value="nonstandard">
+                <label for="hw-format-nonstandard" onclick="switchHwFormat('nonstandard')"><i class="ph ph-cube"></i> Non-standard</label>
+            </div>
+            <div class="field-hint" style="margin-top:8px"><i class="ph ph-warning-circle"></i> Format is permanent and cannot be changed after creation.</div>
+        `)}
+        ${createFormSection('ph-identification-card', 'Basic Info', 'Core product identity and catalog classification.', `
+        ${createField('new-p-name', 'Product Name', { required: true, maxlength: 100, placeholder: 'e.g. Brand + Model or custom display name' })}
+        <div class="form-grid-two">
+            <div id="new-p-vendor-block" class="min-w-0">${createField('new-p-vendor', 'Vendor', { required: true, maxlength: 100, placeholder: 'e.g. Phison Electronics' })}</div>
+            <div>
+                <label for="new-p-product-type" class="field-label">Product Type <span class="req">*</span></label>
+                <select id="new-p-product-type" class="input-field" required>
+                    <option value="">Please select</option>
+                    ${hardwareOptions}
+                </select>
+                <div id="new-p-product-type-error" class="field-error-text"></div>
+            </div>
+        </div>
+        <datalist id="new-p-vendor-options">${vendorOptions}</datalist>`)}
+
+        <!-- ── Standard-only fields ── -->
+        <div id="hw-standard-section">
+        ${createFormSection('ph-identification-card', 'Model Details', 'Brand and model number for standard products.', `
+            <div class="form-grid-two">
+                ${createField('new-p-brand', 'Brand', { required: true, maxlength: 50, placeholder: 'e.g. GIGABYTE' })}
+                ${createField('new-p-model', 'Model', { required: true, maxlength: 50, placeholder: 'e.g. W773-80' })}
+            </div>`)}
+        ${createFormSection('ph-sliders-horizontal', 'Key Specifications', 'The first three populated rows are required for draft creation.', `
+        <div>
+            <div class="mb-3">
+                <div class="field-label">Key Specifications <span class="text-red-400">*</span></div>
+                <div class="field-hint">Min ${HW_KEY_SPEC_MIN_ITEMS} required · Max ${HW_KEY_SPEC_MAX_ITEMS} · ${HW_KEY_SPEC_MAX_CHARS} chars each</div>
+                <div id="new-p-specs-error" class="field-error-text"></div>
+            </div>
+            <div class="space-y-2">${renderHardwareSpecInputs()}</div>
+        </div>`)}
+        </div>
+
+        <!-- ── Non-standard fields ── -->
+        <div id="hw-nonstandard-section" style="display:none">
+        ${createFormSection('ph-cpu', 'Processor / Platform', 'Supported processors and platforms for this product.', `
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <div class="field-label" style="margin:0">Processor / Platform</div>
+                    <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addNsRow('platform')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
+                </div>
+                <div id="new-p-platform-list" class="space-y-2">
+                    ${nsRowHtml('new-p-platform-0', 'e.g. NVIDIA RTX A6000', '', 'updateNsCounter()', 'renderHardwareCreatePreview()')}
+                </div>
+            </div>`)}
+        ${createFormSection('ph-sliders-horizontal', 'Key Specifications', 'Technical specifications for this product.', `
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <div class="field-label" style="margin:0">Key Specifications</div>
+                    <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addNsRow('spec')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
+                </div>
+                <div id="new-p-nsspec-list" class="space-y-2">
+                    ${nsRowHtml('new-p-nsspec-0', 'e.g. Max. GPU x8', '', 'updateNsCounter()', 'renderHardwareCreatePreview()')}
+                </div>
+                <div id="ns-item-counter" style="margin-top:8px;font-size:11px;font-weight:600;color:#86868b">0 / ${HW_NS_MAX_ITEMS} items used</div>
+                <div id="new-p-ns-error" class="field-error-text"></div>
+            </div>`)}
+        </div>
+
+        ${createFormSection('ph-image', 'Product Image', 'Single storefront image. New uploads replace the previous image.', `
+        <div>
+            <label class="field-label">Product Image <span class="req">*</span></label>
+            <label class="file-upload-wrap">
+                <input id="new-p-image" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleHardwareImageUpload(this)">
+                <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
+                <span class="file-upload-text">Max 5MB · JPG / JPEG / PNG</span>
+            </label>
+            <div id="new-p-image-error" class="field-error-text"></div>
+            <div id="hardware-image-status" class="mt-2"></div>
+        </div>`)}
+        ${createFormSection('ph-sparkle', 'Frontend Display', 'Optional storefront badge and link treatment.', `
+            <label class="flex items-center gap-3 cursor-pointer group">
+                <input type="checkbox" id="new-p-aidaptiv" class="w-4 h-4 rounded border-[#e8eaed] accent-aiso">
+                <div>
+                    <div class="text-sm font-semibold text-[#1d1d1f]">aiDAPTIV</div>
+                    <div class="text-[11px] text-[#86868b]">Display aiDAPTIV logo, badge, and link on the frontend preview</div>
+                </div>
+            </label>
+        `)}`;
+
+    const softwareFields = `
+        ${createFormSection('ph-identification-card', 'Basic Info', 'Product identity shown in lists and storefront preview.', `
+        ${createField('new-p-name', 'Product Name', { required: true, maxlength: 100, placeholder: 'e.g. OrientAI Express' })}
+        ${createField('new-p-vendor', 'Vendor', { required: true, maxlength: 100, placeholder: 'e.g. TPIsoftware Corporation' })}
+        <datalist id="new-p-vendor-options">${vendorOptions}</datalist>
+        <div>
+            <label class="field-label">Product Icon</label>
+            <label class="file-upload-wrap">
+                <input id="new-p-icon" type="file" accept=".jpg,.jpeg,.png,.svg,image/jpeg,image/png,image/svg+xml" onchange="handleSoftwareIconUpload(this)">
+                <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
+                <span class="file-upload-text">Square icon · Max 5MB · JPG / PNG / SVG</span>
+            </label>
+            <div id="new-p-icon-error" class="field-error-text"></div>
+            <div id="software-icon-status" class="mt-2"></div>
+        </div>
+        `)}
+        ${createFormSection('ph-chat-centered-text', 'Positioning', 'Customer-facing copy, category, and feature bullets.', `
+        ${createTextArea('new-p-pitch', 'Short Pitch', { maxlength: 300, rows: 2, placeholder: 'One-line pitch...' })}
+        <div id="new-p-pitch-count" class="field-hint" style="margin-top:-4px">0/300</div>
+        <div>
+            <div class="field-label mb-3">Category <span class="req">*</span> <span class="text-[10px] text-[#86868b] font-bold" style="margin-left:4px">Max ${SW_CATEGORY_MAX}</span></div>
+            ${renderSwCategoryChecks('new-p-categories')}
+        </div>
+        <div>
+            <div class="flex items-center justify-between mb-3">
+                <div class="field-label">Key Features</div>
+                <span class="text-[10px] text-[#86868b] font-bold">Max 5 · 150 chars each</span>
+            </div>
+            <div class="space-y-2">${renderSoftwareFeatureInputs()}</div>
+        </div>
+        <div>
+            <div class="field-label mb-3">Applicable Industries</div>
+            <div id="new-p-industries" class="flex flex-wrap gap-2">
+                ${SOFTWARE_INDUSTRY_OPTIONS.filter(o => o.is_active).map(o => `<label class="preview-pill cursor-pointer"><input type="checkbox" value="${esc(o.label)}" class="mr-2 accent-aiso">${esc(o.label)}</label>`).join('')}
+            </div>
+        </div>`)}
+        ${createFormSection('ph-images', 'Product Images', 'Upload up to five images for the storefront preview.', `
+            <label class="field-label">Product Images</label>
+            <label class="file-upload-wrap">
+                <input id="new-p-images" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple onchange="handleSoftwareImageUpload(this)">
+                <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose Files</span>
+                <span class="file-upload-text">Max 5 images · 5MB each · JPG / PNG</span>
+            </label>
+            <div id="new-p-images-error" class="field-error-text"></div>
+            <div id="software-image-status" class="mt-2"></div>
+        `)}
+        ${createFormSection('ph-hard-drives', 'Compatibility', 'Select hardware products that can pair with this software.', `
+            <div class="field-label mb-3">Compatible Hardware</div>
+            <div id="new-p-compatible-hw" class="space-y-2">
+                ${allHW.map(h => `<label class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[#1d1d1f] cursor-pointer hover:bg-[#f5f5f7] transition">
+                    <input type="checkbox" value="${esc(h.id)}" class="w-4 h-4 accent-aiso">
+                    <i class="ph ph-hard-drives text-aiso"></i>
+                    <span class="font-semibold text-[#1d1d1f]">${esc(h.name)}</span>
+                    <span class="ml-auto text-xs text-[#86868b]">${esc(h.model || h.sub_category || '')}</span>
+                </label>`).join('')}
+                ${!allHW.length ? '<div class="text-xs text-[#86868b] italic">No published hardware products available</div>' : ''}
+            </div>
+        `)}`;
+
+    showModal(`
+        <div class="create-modal-shell">
+            <div class="create-modal-header">
+                <div class="create-modal-title-row">
+                    <div class="create-modal-icon"><i class="ph ${isSW ? 'ph-app-window' : 'ph-hard-drives'}"></i></div>
+                    <div class="min-w-0">
+                        <div class="create-modal-kicker">${isSW ? 'Software Product' : 'Hardware Product'}</div>
+                        <h3 class="text-xl font-bold truncate">${title}</h3>
+                    </div>
+                </div>
+                <button onclick="closeModal()" class="create-modal-close" aria-label="Close"><i class="ph ph-x text-xl"></i></button>
+            </div>
+            <div class="create-modal-grid">
+            <div class="create-form-scroll">
+                <form id="create-product-form" novalidate>
+                    ${isSW ? softwareFields : hardwareFields}
+                    <div class="form-actions">
+                        <button type="button" onclick="closeModal()" class="btn-secondary">Cancel</button>
+                        <button type="submit" class="btn-primary">Create Draft</button>
+                    </div>
+                </form>
+            </div>
+            <div id="create-live-preview" class="create-preview-scroll ${isSW ? 'is-software' : 'is-hardware'}"></div>
+            </div>
+        </div>`, true);
+
+    document.getElementById('create-product-form').addEventListener('submit', event => {
+        event.preventDefault();
+        createProduct(type);
+    });
+    document.getElementById('new-p-vendor')?.setAttribute('list', 'new-p-vendor-options');
+    setupCreateProductBindings(type);
+}
+
+function createProduct(type) {
+    if (!validateCreateProductForm(type)) {
+        showToast('Please fix the highlighted fields', 'error');
+        return;
+    }
+    const isSW = type === 'software';
+    const isNsHw = !isSW && getHwFormat() === 'nonstandard';
+    const name = valueOf('new-p-name');
+    const vendorName = isNsHw ? '' : valueOf('new-p-vendor');
+    const newCategories = isSW ? getCheckedValues('new-p-categories').slice(0, SW_CATEGORY_MAX) : [];
+    const today = new Date().toISOString().slice(0, 10);
+    const newP = {
+        id: `${type.slice(0, 2)}${Date.now() % 100000}`,
+        product_type: type,
+        vendor_id: isNsHw ? null : getMatchingVendorId(vendorName, type),
+        vendor_name: vendorName,
+        name,
+        brand: isSW ? vendorName : valueOf('new-p-brand'),
+        sub_category: isSW ? (newCategories[0] || '') : valueOf('new-p-product-type'),
+        short_description: isSW ? valueOf('new-p-desc') : '',
+        status: 'draft',
+        display_order: PRODUCTS.filter(p => p.product_type === type).length + 1,
+        created_at: today,
+        updated_at: today,
+    };
+
+    if (isSW) {
+        newP.categories = newCategories;
+        newP.tagline = valueOf('new-p-pitch');
+        newP.sw_category = 'optional';
+        newP.features = collectSoftwareFeatures();
+        newP.industries = getCheckedValues('new-p-industries');
+        newP.compatible_hardware = getCheckedValues('new-p-compatible-hw');
+        newP.photos = createProductState.softwareImages.map(img => img.name);
+        newP.image_name = createProductState.softwareImages[0]?.name || '';
+        newP.icon_name = createProductState.softwareIcon?.name || '';
+        newP.photos_data = createProductState.softwareImages.map(img => img.dataUrl).filter(Boolean);
+        newP.image_data = createProductState.softwareImages[0]?.dataUrl || '';
+        newP.icon_data = createProductState.softwareIcon?.dataUrl || '';
+    } else {
+        const fmt = getHwFormat();
+        newP.product_format = fmt;
+        newP.is_aidaptiv = document.getElementById('new-p-aidaptiv')?.checked || false;
+        newP.image_name = createProductState.hardwareImage?.name || '';
+        newP.photos = createProductState.hardwareImage ? [createProductState.hardwareImage.name] : [];
+        newP.image_data = createProductState.hardwareImage?.dataUrl || '';
+        newP.photos_data = createProductState.hardwareImage?.dataUrl ? [createProductState.hardwareImage.dataUrl] : [];
+        if (fmt === 'standard') {
+            newP.model = valueOf('new-p-model');
+            newP.key_specifications = collectHardwareSpecs();
+            newP.bestFor = [];
+        } else {
+            newP.model = '';
+            newP.ns_platforms = collectNsItems('new-p-platform');
+            newP.key_specifications = collectNsItems('new-p-nsspec');
+            newP.bestFor = [];
+        }
+    }
+
+    PRODUCTS.push(newP);
+    logActivity('Created', name, `${type} · draft`);
+    closeModal();
+    showToast(`${name} created as draft`, 'success');
+    navigate(isSW ? 'sw-products' : 'hw-products');
+}
+
+function showEditProductModal(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    editSwImages = []; editSwIcon = null; editHwImage = null; editHwFormat = p.product_format || 'standard';
+    const isSW = p.product_type === 'software';
+    const publishedHW = PRODUCTS.filter(x => x.product_type === 'hardware' && x.status === 'published');
+    // Currently-referenced hardware that is no longer published: shown checked but disabled (pruned on publish, not silently here)
+    const unpublishedRefHW = (p.compatible_hardware || [])
+        .map(hid => PRODUCTS.find(x => x.id === hid))
+        .filter(h => h && h.status !== 'published');
+    const compatHwChoices = [...publishedHW, ...unpublishedRefHW];
+    const activeIndustries = SOFTWARE_INDUSTRY_OPTIONS.filter(o => o.is_active);
+    const activeHwTypes = HARDWARE_PRODUCT_TYPES.filter(o => o.is_active);
+
+    const featureInputs = Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => {
+        const val = (p.features || [])[i] || '';
+        return `<div class="flex items-center gap-2">
+            <span class="text-xs text-[#86868b] font-bold w-5 text-center">${i + 1}</span>
+            <input id="edit-p-feat-${i}" type="text" maxlength="150" class="input-field flex-1" value="${esc(val)}" placeholder="${i < 1 ? 'e.g. Core capability...' : 'Optional'}">
+        </div>`;
+    }).join('');
+
+    const specInputs = Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => {
+        const val = (p.key_specifications || [])[i] || '';
+        return `<div class="flex items-center gap-2">
+            <span class="text-xs text-[#86868b] font-bold w-5 text-center">${i + 1}</span>
+            <input id="edit-p-spec-${i}" type="text" maxlength="${HW_KEY_SPEC_MAX_CHARS}" class="input-field flex-1" value="${esc(val)}" placeholder="${i < 3 ? 'Required' : 'Optional'}">
+        </div>`;
+    }).join('');
+
+    const swFields = `
+        ${createFormSection('ph-identification-card', 'Basic Info', 'Core product identity.', `
+            ${createField('edit-p-name', 'Product Name', { required: true, maxlength: 100 })}
+            ${createField('edit-p-vendor', 'Vendor', { required: true, maxlength: 100 })}
+        `)}
+        ${createFormSection('ph-chat-centered-text', 'Positioning', 'Customer-facing copy, category, and features.', `
+            <div>
+                <div class="field-label mb-3">Category <span class="req">*</span> <span class="text-[10px] text-[#86868b] font-bold" style="margin-left:4px">Max ${SW_CATEGORY_MAX}</span></div>
+                ${renderSwCategoryChecks('edit-p-categories', getSwCategories(p))}
+            </div>
+            ${createField('edit-p-tagline', 'Short Pitch', { maxlength: 300 })}
+            <div id="edit-p-tagline-count" class="field-hint" style="margin-top:-4px">0/300</div>
+            <div>
+                <div class="flex items-center justify-between mb-3">
+                    <div class="field-label">Key Features</div>
+                    <span class="text-[10px] text-[#86868b] font-bold">Max ${SOFTWARE_FEATURE_MAX_ITEMS} · 150 chars each</span>
+                </div>
+                <div class="space-y-2">${featureInputs}</div>
+            </div>
+            <div>
+                <div class="field-label mb-3">Applicable Industries</div>
+                <div id="edit-p-industries" class="flex flex-wrap gap-2">
+                    ${activeIndustries.map(o => `<label class="preview-pill cursor-pointer"><input type="checkbox" value="${esc(o.label)}" class="mr-2 accent-aiso" ${(p.industries || []).includes(o.label) ? 'checked' : ''}>${esc(o.label)}</label>`).join('')}
+                </div>
+            </div>
+        `)}
+        ${createFormSection('ph-images', 'Product Images', 'Upload up to five images for the storefront preview.', `
+            <div>
+                <label class="field-label">Product Images</label>
+                <label class="file-upload-wrap">
+                    <input id="edit-p-images" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple onchange="handleEditSwImageUpload(this)">
+                    <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose Files</span>
+                    <span class="file-upload-text">Max 5 images · 5MB each · JPG / PNG</span>
+                </label>
+                <div id="edit-p-images-error" class="field-error-text"></div>
+            </div>
+            <div id="edit-p-images-status"></div>
+            <div>
+                <label class="field-label">Product Icon</label>
+                <label class="file-upload-wrap">
+                    <input id="edit-p-icon" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleEditSwIconUpload(this)">
+                    <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
+                    <span class="file-upload-text">Square icon for logo mark</span>
+                </label>
+                <div id="edit-p-icon-error" class="field-error-text"></div>
+            </div>
+            <div id="edit-p-icon-status"></div>
+        `)}
+        ${createFormSection('ph-hard-drives', 'Compatibility', 'Hardware products that pair with this software.', `
+            <div class="field-label mb-3">Compatible Hardware</div>
+            <div id="edit-p-compat-hw" class="space-y-2">
+                ${compatHwChoices.map(h => {
+                    const isUnpub = h.status !== 'published';
+                    return `<label class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[#1d1d1f] ${isUnpub ? 'opacity-60' : 'cursor-pointer hover:bg-[#f5f5f7]'} transition">
+                    <input type="checkbox" value="${esc(h.id)}" class="w-4 h-4 accent-aiso" ${(p.compatible_hardware || []).includes(h.id) ? 'checked' : ''} ${isUnpub ? 'disabled' : ''}>
+                    <i class="ph ph-hard-drives text-aiso"></i>
+                    <span class="font-semibold text-[#1d1d1f]">${esc(h.name)}${isUnpub ? ' <span style="color:#d97706;font-weight:500">(unpublished)</span>' : ''}</span>
+                    <span class="ml-auto text-xs text-[#86868b]">${esc(h.model || h.sub_category || '')}</span>
+                </label>`;
+                }).join('')}
+                ${!compatHwChoices.length ? '<div class="text-xs text-[#86868b] italic">No published hardware products available</div>' : ''}
+            </div>
+        `)}`;
+
+    const hwFmt = p.product_format || 'standard';
+    const isStandardHw = hwFmt === 'standard';
+    const fmtBadgeHtml = `<div style="margin-bottom:4px">
+        <span class="format-badge ${isStandardHw ? 'is-standard' : 'is-nonstandard'}">
+            <i class="ph ${isStandardHw ? 'ph-list-bullets' : 'ph-cube'}"></i>
+            ${isStandardHw ? 'Standard' : 'Non-standard'}
+        </span>
+        <span style="font-size:11px;color:#86868b;margin-left:6px">Format is locked after creation</span>
+    </div>`;
+
+    // Build non-standard edit inputs from existing data
+    const editNsPlatforms = (p.ns_platforms || []);
+    const editNsSpecs = isStandardHw ? [] : (p.key_specifications || []);
+    const editNsPlatformRows = (editNsPlatforms.length ? editNsPlatforms : ['']).map((v, i) =>
+        nsRowHtml(`edit-p-platform-${i}`, 'e.g. NVIDIA RTX A6000', v, 'updateEditNsCounter()', "renderEditPreview('hardware')")).join('');
+    const editNsSpecRows = (editNsSpecs.length ? editNsSpecs : ['']).map((v, i) =>
+        nsRowHtml(`edit-p-nsspec-${i}`, 'e.g. Max. GPU x8', v, 'updateEditNsCounter()', "renderEditPreview('hardware')")).join('');
+
+    const hwFields = `
+        ${createFormSection('ph-identification-card', 'Basic Info', 'Core product identity and classification.', `
+            ${fmtBadgeHtml}
+            ${createField('edit-p-name', 'Product Name', { required: true, maxlength: 100 })}
+            <div class="form-grid-two">
+                ${isStandardHw ? createField('edit-p-vendor', 'Vendor', { required: true, maxlength: 100, wrapClass: 'min-w-0' }) : ''}
+                <div>
+                    <label for="edit-p-hw-type" class="field-label">Product Type</label>
+                    <select id="edit-p-hw-type" class="input-field">
+                        ${activeHwTypes.map(o => `<option value="${esc(o.label)}" ${o.label === p.sub_category ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            ${isStandardHw ? `<div class="form-grid-two">
+                ${createField('edit-p-brand', 'Brand', { required: true, maxlength: 50 })}
+                ${createField('edit-p-model', 'Model', { required: true, maxlength: 50 })}
+            </div>` : ''}
+            ${createTextArea('edit-p-desc', 'Description', { maxlength: 500, rows: 3 })}
+        `)}
+        ${isStandardHw ? createFormSection('ph-sliders-horizontal', 'Key Specifications', 'Displayed as bullet points on the storefront card.', `
+            <div>
+                <div class="mb-3">
+                    <div class="field-label">Key Specifications</div>
+                    <div class="field-hint">Min ${HW_KEY_SPEC_MIN_ITEMS} required · Max ${HW_KEY_SPEC_MAX_ITEMS} · ${HW_KEY_SPEC_MAX_CHARS} chars each</div>
+                </div>
+                <div class="space-y-2">${specInputs}</div>
+            </div>
+        `) : `
+        ${createFormSection('ph-cpu', 'Processor / Platform', 'Supported processors and platforms.', `
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <div class="field-label" style="margin:0">Processor / Platform</div>
+                    <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addEditNsRow('platform')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
+                </div>
+                <div id="edit-p-platform-list" class="space-y-2">${editNsPlatformRows}</div>
+            </div>`)}
+        ${createFormSection('ph-sliders-horizontal', 'Key Specifications', 'Technical specifications.', `
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <div class="field-label" style="margin:0">Key Specifications</div>
+                    <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addEditNsRow('spec')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
+                </div>
+                <div id="edit-p-nsspec-list" class="space-y-2">${editNsSpecRows}</div>
+                <div id="edit-ns-item-counter" style="margin-top:8px;font-size:11px;font-weight:600;color:#86868b"></div>
+            </div>`)}
+        `}
+        ${createFormSection('ph-image', 'Product Image', 'Main product image for the storefront card.', `
+            <div>
+                <label class="field-label">Product Image</label>
+                <label class="file-upload-wrap">
+                    <input id="edit-p-hw-image" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleEditHwImageUpload(this)">
+                    <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
+                    <span class="file-upload-text">5MB max · JPG / JPEG / PNG</span>
+                </label>
+                <div id="edit-p-hw-image-error" class="field-error-text"></div>
+            </div>
+            <div id="edit-p-hw-image-status"></div>
+        `)}
+        ${createFormSection('ph-sparkle', 'Frontend Display', 'Storefront badge and link treatment.', `
+            <label class="flex items-center gap-3 cursor-pointer group">
+                <input type="checkbox" id="edit-p-aidaptiv" class="w-4 h-4 rounded border-[#e8eaed] accent-aiso" ${p.is_aidaptiv ? 'checked' : ''}>
+                <div>
+                    <div class="text-sm font-semibold text-[#1d1d1f]">aiDAPTIV</div>
+                    <div class="text-[11px] text-[#86868b]">Display aiDAPTIV logo, badge, and link on the frontend preview</div>
+                </div>
+            </label>
+        `)}`;
+
+    const modalHtml = `
+        <div class="create-modal-shell">
+            <div class="create-modal-header">
+                <div class="create-modal-title-row">
+                    <div class="create-modal-icon"><i class="ph ${isSW ? 'ph-app-window' : 'ph-hard-drives'}"></i></div>
+                    <div class="min-w-0">
+                        <div class="create-modal-kicker">${isSW ? 'Software' : 'Hardware'} · ${!isSW ? (hwFmt === 'standard' ? 'Standard' : 'Non-standard') + ' · ' : ''}Last updated ${esc(p.updated_at || '—')}</div>
+                        <h3 class="text-xl font-bold truncate">Edit: ${esc(p.name)}</h3>
+                    </div>
+                </div>
+                <button onclick="closeModal()" class="create-modal-close" aria-label="Close"><i class="ph ph-x text-xl"></i></button>
+            </div>
+            <div class="create-modal-grid">
+                <div class="create-form-scroll">
+                    <form id="edit-product-form" onsubmit="event.preventDefault();saveProduct('${p.id}')" novalidate>
+                        ${isSW ? swFields : hwFields}
+                        <div class="form-actions">
+                            <button type="button" onclick="closeModal()" class="btn-secondary">Cancel</button>
+                            <button type="submit" class="btn-primary">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+                <div id="edit-live-preview" class="create-preview-scroll ${isSW ? 'is-software' : 'is-hardware'}"></div>
+            </div>
+        </div>`;
+    showModal(modalHtml, true);
+
+    // Pre-fill values
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    setVal('edit-p-name', p.name);
+    setVal('edit-p-vendor', p.vendor_name);
+    setVal('edit-p-desc', p.short_description);
+    if (isSW) {
+        setVal('edit-p-tagline', p.tagline);
+        updateCharCounter('edit-p-tagline');
+        document.getElementById('edit-p-tagline')?.addEventListener('input', () => updateCharCounter('edit-p-tagline'));
+        updateSwCategoryLimit('edit-p-categories');
+    } else {
+        setVal('edit-p-brand', p.brand);
+        setVal('edit-p-model', p.model);
+    }
+    // Render existing images status
+    if (isSW) renderEditSwImageStatus(p);
+
+    // Setup live preview bindings
+    if (isSW) {
+        setupEditPreviewBindings('software');
+        renderEditPreview('software');
+    } else {
+        setupEditPreviewBindings('hardware');
+        renderEditPreview('hardware');
+    }
+}
+
+/* ── Edit modal preview ── */
+function setupEditPreviewBindings(type) {
+    const form = document.getElementById('edit-product-form');
+    if (!form) return;
+    const rerender = () => renderEditPreview(type);
+    form.querySelectorAll('input, textarea, select').forEach(el => {
+        if (el.type === 'file') return;
+        if (el.type === 'checkbox') { el.addEventListener('change', rerender); return; }
+        el.addEventListener('input', rerender);
+        el.addEventListener('change', rerender);
+    });
+}
+
+function renderEditPreview(type) {
+    const target = document.getElementById('edit-live-preview');
+    if (!target) return;
+    if (type === 'software') renderEditSwPreview(target);
+    else renderEditHwPreview(target);
+}
+
+function renderEditSwPreview(target) {
+    const val = id => (document.getElementById(id)?.value || '').trim();
+    const name = val('edit-p-name');
+    const vendor = val('edit-p-vendor');
+    const pitch = val('edit-p-tagline');
+    const features = Array.from({ length: 5 }, (_, i) => val(`edit-p-feat-${i}`)).filter(Boolean);
+    const industries = Array.from(document.querySelectorAll('#edit-p-industries input:checked')).map(cb => cb.value);
+    const images = editSwImages;
+    const icon = editSwIcon;
+    const initials = name ? name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2) : '';
+
+    const PLACEHOLDER = 'color:#9aa6bf';
+    const SVG_F = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;color:#7c8ec8;flex-shrink:0"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>';
+    const SVG_I = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;color:#7c8ec8;flex-shrink:0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
+
+    const featHtml = features.length
+        ? `<ul class="sd-feature-list">${features.map(f => `<li class="sd-feature-item"><span class="sd-feature-dot"></span><span>${esc(f)}</span></li>`).join('')}</ul>`
+        : `<div style="padding:12px 14px;${PLACEHOLDER};font-size:0.82rem">Add up to 5 key features...</div>`;
+    const indHtml = industries.length
+        ? `<div class="sd-industry-list">${industries.map(i => `<span class="sd-industry-chip">${esc(i)}</span>`).join('')}</div>`
+        : `<div style="padding:12px 14px;${PLACEHOLDER};font-size:0.82rem">Select applicable industries...</div>`;
+    const markContent = icon
+        ? `<img src="${esc(icon.url)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:20px">`
+        : initials ? esc(initials) : '<i class="ph ph-package" style="font-size:1.4rem;opacity:0.5"></i>';
+
+    target.innerHTML = `
+        <div class="sw-preview-eyebrow"><i class="ph ph-eye" style="font-size:0.8rem"></i> Live Preview</div>
+        <div class="software-live-preview">
+            <div class="sd-hero" style="position:relative;padding-top:28px">
+                <div class="sd-hero-header">
+                    <div class="sd-mark">${markContent}</div>
+                    <div style="min-width:0;flex:1">
+                        <p class="sd-company">${vendor ? esc(vendor) : `<span style="${PLACEHOLDER}">Company Name</span>`}</p>
+                        <h2 class="sd-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name ? esc(name) : `<span style="${PLACEHOLDER};font-weight:500">Product Name</span>`}</h2>
+                    </div>
+                </div>
+                <p class="sd-tagline">${pitch ? esc(pitch) : `<span style="${PLACEHOLDER}">Short product description...</span>`}</p>
+            </div>
+            <div class="sd-content">
+                <section class="sd-meta-block"><div class="sd-meta-title">${SVG_F} Key Features</div>${featHtml}</section>
+                ${renderPreviewGallery(images)}
+                <section class="sd-meta-block"><div class="sd-meta-title">${SVG_I} Applicable Industries</div>${indHtml}</section>
+            </div>
+            <div class="sd-action-footer" style="margin-top:auto">
+                <button class="sd-action-primary" type="button">Select Add-on</button>
+                <span class="sd-quote-link">Request a custom quote for this add-on</span>
+            </div>
+        </div>`;
+}
+
+function renderEditHwPreview(target) {
+    const val = id => (document.getElementById(id)?.value || '').trim();
+    const name = val('edit-p-name') || 'Product Name';
+    const category = val('edit-p-hw-type');
+    const isAidaptiv = document.getElementById('edit-p-aidaptiv')?.checked || false;
+    const image = editHwImage;
+    const imgHtml = image
+        ? `<img src="${esc(image.url)}" alt="" style="width:100%;height:100%;object-fit:cover">`
+        : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#86868b"><i class="ph ph-image" style="font-size:2rem"></i></div>';
+    const fmt = editHwFormat;
+    const fmtBadge = `<span class="format-badge ${fmt === 'standard' ? 'is-standard' : 'is-nonstandard'}"><i class="ph ${fmt === 'standard' ? 'ph-list-bullets' : 'ph-cube'}"></i> ${fmt === 'standard' ? 'Standard' : 'Non-standard'}</span>`;
+
+    if (fmt === 'nonstandard') {
+        const platforms = collectNsItems('edit-p-platform');
+        const nsSpecs = collectNsItems('edit-p-nsspec');
+        target.innerHTML = `
+            <div class="preview-eyebrow"><span class="preview-eyebrow-left"><i class="ph ph-eye" style="font-size:0.8rem"></i> Live Preview</span>${fmtBadge}</div>
+            <div class="hw-preview-card">
+                <div class="hw-preview-media">${imgHtml}</div>
+                <div class="hw-preview-body">
+                    <h4 class="hw-preview-title">${esc(name)}</h4>
+                    <div class="hw-preview-category">${esc(category || 'Product Type')}</div>
+                    <hr class="hw-preview-divider">
+                    ${platforms.length ? `<div class="preview-section">
+                        <div class="preview-section-title"><i class="ph ph-cpu" style="color:#7c8ec8"></i> Processor / Platform</div>
+                        <ul class="hw-spec-list">${platforms.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul>
+                    </div>` : ''}
+                    ${nsSpecs.length ? `<div class="preview-section">
+                        <div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div>
+                        <ul class="hw-spec-list">${nsSpecs.map(s => '<li><span>' + esc(s) + '</span></li>').join('')}</ul>
+                    </div>` : ''}
+                    ${!platforms.length && !nsSpecs.length ? '<div style="padding:10px 14px;color:#6d7695;font-size:0.82rem;font-style:italic">Add platform or spec items...</div>' : ''}
+                    ${isAidaptiv ? '<div class="hw-aidaptiv-row"><span style="font-size:1rem;font-weight:900;color:#1d1d1f">aiDAPTIV</span><span class="hw-aidaptiv-link">What is aiDaptiv?</span></div>' : ''}
+                    <button type="button" class="hw-preview-cta">Next: View Spec</button>
+                </div>
+            </div>
+            <div style="margin-top:10px;text-align:center;font-size:0.62rem;color:#86868b;font-style:italic">Non-standard storefront card preview</div>`;
+        return;
+    }
+
+    const specs = Array.from({ length: 8 }, (_, i) => val(`edit-p-spec-${i}`)).filter(Boolean);
+    target.innerHTML = `
+        <div class="preview-eyebrow"><span class="preview-eyebrow-left"><i class="ph ph-eye" style="font-size:0.8rem"></i> Live Preview</span>${fmtBadge}</div>
+        <div class="hw-preview-card">
+            <div class="hw-preview-media">${imgHtml}</div>
+            <div class="hw-preview-body">
+                <h4 class="hw-preview-title">${esc(name)}</h4>
+                <div class="hw-preview-category">${esc(category || 'Product Type')}</div>
+                <hr class="hw-preview-divider">
+                <div class="preview-section">
+                    <div class="preview-section-title"><i class="ph ph-sliders-horizontal" style="color:#7c8ec8"></i> Key Specifications</div>
+                    ${specs.length ? '<ul class="hw-spec-list">' + specs.map(s => '<li><span>' + esc(s) + '</span></li>').join('') + '</ul>' : '<div style="padding:10px 14px 12px;color:#6d7695;font-size:0.82rem;font-style:italic">Fill in key specifications...</div>'}
+                </div>
+                ${isAidaptiv ? '<div class="hw-aidaptiv-row"><span style="font-size:1rem;font-weight:900;color:#1d1d1f">aiDAPTIV</span><span class="hw-aidaptiv-link">What is aiDaptiv?</span></div>' : ''}
+                <button type="button" class="hw-preview-cta">Select Hardware</button>
+            </div>
+        </div>
+        <div style="margin-top:10px;text-align:center;font-size:0.62rem;color:#86868b;font-style:italic">Standard storefront card preview</div>`;
+}
+
+/* ── Edit modal image handlers ── */
+let editSwImages = [];
+let editSwIcon = null;
+let editHwImage = null;
+let editHwFormat = 'standard';
+
+function renderEditSwImageStatus(p) {
+    const container = document.getElementById('edit-p-images-status');
+    if (!container) return;
+    const photos = editSwImages.length ? editSwImages : (p?.photos || []).map(n => ({ name: n, isExisting: true }));
+    if (!photos.length) { container.innerHTML = ''; return; }
+    container.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:11px;color:#86868b;font-weight:600">${photos.length}/5 images</span>
+            <button type="button" onclick="editSwImages=[];renderEditSwImageStatus()" style="font-size:11px;color:#d97706;font-weight:600;background:none;border:none;cursor:pointer">Clear all</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${photos.map((img, i) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><i class="ph ph-image" style="color:#86868b"></i> ${esc(img.name)} <button type="button" onclick="editSwImages.splice(${i},1);renderEditSwImageStatus()" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`).join('')}</div>`;
+}
+
+function handleEditSwImageUpload(input) {
+    const errEl = document.getElementById('edit-p-images-error');
+    if (errEl) errEl.textContent = '';
+    const files = Array.from(input.files || []);
+    const valid = files.filter(f => f.size <= 5 * 1024 * 1024 && /\.(jpe?g|png)$/i.test(f.name));
+    if (valid.length !== files.length && errEl) errEl.textContent = 'Some files were skipped (wrong type or >5MB).';
+    const remaining = 5 - editSwImages.length;
+    if (valid.length > remaining && errEl) errEl.textContent = `Maximum 5 images. Only ${remaining} added.`;
+    editSwImages.push(...valid.slice(0, remaining).map(f => {
+        const obj = { file: f, name: f.name, url: URL.createObjectURL(f) };
+        Store.compressImage(f).then(d => { obj.dataUrl = d; }).catch(() => {});
+        return obj;
+    }));
+    input.value = '';
+    renderEditSwImageStatus();
+    renderEditPreview('software');
+}
+
+function handleEditSwIconUpload(input) {
+    const errEl = document.getElementById('edit-p-icon-error');
+    if (errEl) errEl.textContent = '';
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024 || !/\.(jpe?g|png)$/i.test(file.name)) {
+        if (errEl) errEl.textContent = 'Invalid file. Use JPG/PNG under 5MB.';
+        input.value = ''; return;
+    }
+    editSwIcon = { file, name: file.name, url: URL.createObjectURL(file) };
+    const editIconObj = editSwIcon;
+    Store.compressImage(file).then(d => { editIconObj.dataUrl = d; }).catch(() => {});
+    renderEditPreview('software');
+    const statusEl = document.getElementById('edit-p-icon-status');
+    if (statusEl) statusEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><i class="ph ph-image" style="color:#86868b"></i> ${esc(file.name)} <button type="button" onclick="editSwIcon=null;this.closest('span').remove()" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`;
+}
+
+function handleEditHwImageUpload(input) {
+    const errEl = document.getElementById('edit-p-hw-image-error');
+    if (errEl) errEl.textContent = '';
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024 || !/\.(jpe?g|png)$/i.test(file.name)) {
+        if (errEl) errEl.textContent = 'Invalid file. Use JPG/PNG under 5MB.';
+        input.value = ''; return;
+    }
+    editHwImage = { file, name: file.name, url: URL.createObjectURL(file) };
+    const editHwImgObj = editHwImage;
+    Store.compressImage(file).then(d => { editHwImgObj.dataUrl = d; }).catch(() => {});
+    renderEditPreview('hardware');
+    const statusEl = document.getElementById('edit-p-hw-image-status');
+    if (statusEl) statusEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><i class="ph ph-image" style="color:#86868b"></i> ${esc(file.name)} <button type="button" onclick="editHwImage=null;this.closest('span').remove()" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`;
+}
+
+function saveProduct(pid) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    const isSW = p.product_type === 'software';
+    const val = id => (document.getElementById(id)?.value || '').trim();
+
+    const isNsHw = !isSW && (p.product_format || 'standard') === 'nonstandard';
+
+    // Basic validation
+    if (!val('edit-p-name')) { showToast('Product Name is required', 'error'); setCreateError('edit-p-name', 'Required'); return; }
+    if (!isNsHw && !val('edit-p-vendor')) { showToast('Vendor is required', 'error'); setCreateError('edit-p-vendor', 'Required'); return; }
+    if (isSW && !getCheckedValues('edit-p-categories').length) { showToast('At least 1 category is required', 'error'); setCreateError('edit-p-categories', 'Select at least 1 category.'); return; }
+    if (!isSW && (p.product_format || 'standard') === 'standard') {
+        if (!val('edit-p-brand')) { showToast('Brand is required', 'error'); setCreateError('edit-p-brand', 'Required'); return; }
+        if (!val('edit-p-model')) { showToast('Model is required', 'error'); setCreateError('edit-p-model', 'Required'); return; }
+        const editSpecs = Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => val(`edit-p-spec-${i}`)).filter(Boolean);
+        if (editSpecs.length < HW_KEY_SPEC_MIN_ITEMS) { showToast(`At least ${HW_KEY_SPEC_MIN_ITEMS} specifications required`, 'error'); return; }
+    }
+
+    p.name = val('edit-p-name') || p.name;
+    if (!isNsHw) p.vendor_name = val('edit-p-vendor') || p.vendor_name;
+    p.short_description = val('edit-p-desc') || p.short_description;
+    p.updated_at = new Date().toISOString().slice(0, 10);
+
+    if (isSW) {
+        p.categories = getCheckedValues('edit-p-categories').slice(0, SW_CATEGORY_MAX);
+        p.sub_category = p.categories[0] || p.sub_category;
+        p.tagline = val('edit-p-tagline');
+        p.features = Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => val(`edit-p-feat-${i}`)).filter(Boolean);
+        p.industries = Array.from(document.querySelectorAll('#edit-p-industries input:checked')).map(cb => cb.value);
+        p.compatible_hardware = Array.from(document.querySelectorAll('#edit-p-compat-hw input:checked')).map(cb => cb.value);
+        if (editSwImages.length) { p.photos = editSwImages.map(img => img.name); p.image_name = editSwImages[0]?.name || ''; p.photos_data = editSwImages.map(img => img.dataUrl).filter(Boolean); p.image_data = editSwImages[0]?.dataUrl || ''; }
+        if (editSwIcon) { p.icon_name = editSwIcon.name; p.icon_data = editSwIcon.dataUrl || ''; }
+    } else {
+        const hwFmt = p.product_format || 'standard';
+        p.sub_category = val('edit-p-hw-type') || p.sub_category;
+        p.is_aidaptiv = document.getElementById('edit-p-aidaptiv')?.checked || false;
+        if (hwFmt === 'standard') {
+            p.brand = val('edit-p-brand') || p.brand;
+            p.model = val('edit-p-model') || p.model;
+            p.key_specifications = Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => val(`edit-p-spec-${i}`)).filter(Boolean);
+        } else {
+            p.ns_platforms = collectNsItems('edit-p-platform');
+            p.key_specifications = collectNsItems('edit-p-nsspec');
+        }
+        if (editHwImage) { p.image_name = editHwImage.name; p.photos = [editHwImage.name]; p.image_data = editHwImage.dataUrl || ''; p.photos_data = editHwImage.dataUrl ? [editHwImage.dataUrl] : []; }
+    }
+
+    // Reset edit image state
+    editSwImages = []; editSwIcon = null; editHwImage = null;
+    logActivity('Updated', p.name, isSW ? 'software' : 'hardware');
+    closeModal();
+    showToast(`${p.name} updated`, 'success');
+    if (isSW) { renderSwProducts(); showSwDetail(pid); }
+    else { renderHwProducts(); showHwDetail(pid); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════════════
+
+
+// ═══════════════════════════════════════════════════════════════════
+// PARAMETER CENTER
+// ═══════════════════════════════════════════════════════════════════
+
+function switchParamTab(tab) {
+    document.querySelectorAll('.param-tab-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById('param-tab-' + tab)?.classList.remove('hidden');
+    document.querySelectorAll('[data-param-tab]').forEach(b => {
+        b.classList.toggle('active', b.dataset.paramTab === tab);
+    });
+}
+
+function renderParamCenter() {
+    renderParamPackaging();
+    renderParamTagList('param-sw-categories', SOFTWARE_CATEGORY_OPTIONS, 'sw-cat');
+    renderParamTagList('param-sw-industries', SOFTWARE_INDUSTRY_OPTIONS, 'sw-ind');
+    renderParamTagList('param-hw-types', HARDWARE_PRODUCT_TYPES, 'hw-type');
+    renderDisplayOrder('software');
+    renderDisplayOrder('hardware');
+}
+
+/* ── Packaging table ── */
+function renderParamPackaging() {
+    const swProducts = PRODUCTS.filter(p => p.product_type === 'software');
+    document.getElementById('param-sw-packaging-tbody').innerHTML = swProducts.length
+        ? swProducts.map(p => {
+            const isBundled = p.sw_category === 'included';
+            return `<tr>
+                <td>
+                    <div class="flex items-center gap-3">
+                        <div style="width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#0f173a,#1d2e7b);color:#fff;font-size:0.55rem;font-weight:800;letter-spacing:0.06em;flex-shrink:0">${esc(p.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2))}</div>
+                        <div>
+                            <div class="font-bold text-[#1d1d1f] text-sm">${esc(p.name)}</div>
+                            <div class="text-xs text-[#86868b]">${esc(p.sub_category || '')}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="text-sm">${esc(p.vendor_name)}</td>
+                <td>${statusBadge(p.status)}</td>
+                <td>
+                    <select class="border border-[#e8eaed] rounded-lg px-3 py-1.5 text-sm bg-white focus:border-aiso focus:outline-none cursor-pointer font-semibold ${isBundled ? 'text-emerald-700' : 'text-[#1d1d1f]'}"
+                            onchange="updateSwPackaging('${p.id}', this.value)">
+                        <option value="included" ${isBundled ? 'selected' : ''}>Bundled</option>
+                        <option value="optional" ${!isBundled ? 'selected' : ''}>Add-on</option>
+                    </select>
+                </td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="4" class="text-center text-sm text-[#86868b] py-8">No software products found</td></tr>';
+}
+
+function updateSwPackaging(pid, value) {
+    const p = PRODUCTS.find(x => x.id === pid);
+    if (!p) return;
+    p.sw_category = value;
+    Store.save();
+    renderParamPackaging();
+    showToast(`${p.name} updated to ${value === 'included' ? 'Bundled' : 'Add-on'}`);
+}
+
+/* ── Generic inline tag list ── */
+function renderParamTagList(containerId, dataArr, prefix) {
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    const activeCount = dataArr.filter(o => o.is_active).length;
+    const totalCount = dataArr.length;
+    target.innerHTML = `
+        <div class="flex items-center gap-2 mb-3">
+            <span class="text-xs text-[#86868b] font-bold">${activeCount} active / ${totalCount} total</span>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-4">
+            ${dataArr.map((item, idx) => `
+                <div class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-semibold transition
+                    ${item.is_active
+                        ? 'bg-white border-[#e8eaed] text-[#1d1d1f]'
+                        : 'bg-[#fafbfc] border-dashed border-[#e8eaed] text-[#86868b] line-through'}">
+                    <span>${esc(item.label)}</span>
+                    <button type="button" class="ml-1 w-5 h-5 rounded-full flex items-center justify-center text-xs transition
+                        ${item.is_active
+                            ? 'bg-emerald-50 text-emerald-600 hover:bg-red-50 hover:text-red-500'
+                            : 'bg-[#f5f5f7] text-[#86868b] hover:bg-emerald-50 hover:text-emerald-600'}"
+                        onclick="toggleParamTag('${prefix}', ${idx})"
+                        title="${item.is_active ? 'Disable' : 'Enable'}">
+                        <i class="ph ${item.is_active ? 'ph-check' : 'ph-arrow-counter-clockwise'}" style="font-size:10px"></i>
+                    </button>
+                </div>
+            `).join('')}
+        </div>
+        <div class="flex items-center gap-2">
+            <input id="${prefix}-new-input" type="text" maxlength="50" placeholder="Add new item..."
+                class="border border-[#e8eaed] rounded-lg px-3 py-1.5 text-sm flex-1 max-w-xs focus:border-aiso focus:outline-none"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();addParamTag('${prefix}')}">
+            <button type="button" class="btn-primary py-1.5 px-3 text-xs" onclick="addParamTag('${prefix}')">
+                <i class="ph ph-plus"></i> Add
+            </button>
+        </div>`;
+}
+
+function getParamDataArr(prefix) {
+    if (prefix === 'sw-cat') return SOFTWARE_CATEGORY_OPTIONS;
+    if (prefix === 'sw-ind') return SOFTWARE_INDUSTRY_OPTIONS;
+    if (prefix === 'hw-type') return HARDWARE_PRODUCT_TYPES;
+    return [];
+}
+
+function getParamContainerId(prefix) {
+    if (prefix === 'sw-cat') return 'param-sw-categories';
+    if (prefix === 'sw-ind') return 'param-sw-industries';
+    if (prefix === 'hw-type') return 'param-hw-types';
+    return '';
+}
+
+function toggleParamTag(prefix, idx) {
+    const arr = getParamDataArr(prefix);
+    if (!arr[idx]) return;
+    arr[idx].is_active = !arr[idx].is_active;
+    Store.save();
+    renderParamTagList(getParamContainerId(prefix), arr, prefix);
+    showToast(`"${arr[idx].label}" ${arr[idx].is_active ? 'enabled' : 'disabled'}`);
+}
+
+function addParamTag(prefix) {
+    const input = document.getElementById(prefix + '-new-input');
+    const value = (input?.value || '').trim();
+    if (!value) return;
+    const arr = getParamDataArr(prefix);
+    if (arr.some(o => o.label.toLowerCase() === value.toLowerCase())) {
+        showToast('This item already exists', 'warning');
+        return;
+    }
+    arr.push({ label: value, is_active: true });
+    input.value = '';
+    Store.save();
+    renderParamTagList(getParamContainerId(prefix), arr, prefix);
+    showToast(`"${value}" added`);
+}
+
+/* ── Display Order ── */
+function renderDisplayOrder(type) {
+    const containerId = type === 'software' ? 'param-sw-order' : 'param-hw-order';
+    const target = document.getElementById(containerId);
+    if (!target) return;
+    const items = PRODUCTS
+        .filter(p => p.product_type === type)
+        .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
+    if (!items.length) {
+        target.innerHTML = '<div class="text-sm text-[#86868b] text-center py-8">No products found</div>';
+        return;
+    }
+    const publishedItems = items.filter(p => p.status === 'published');
+    const otherItems = items.filter(p => p.status !== 'published');
+    const sortedAll = [...publishedItems, ...otherItems];
+    // Reassign display_order based on sorted position
+    sortedAll.forEach((p, i) => { p.display_order = i + 1; });
+
+    target.innerHTML = `<div class="order-list">${sortedAll.map((p, idx) => {
+        const isDraft = p.status !== 'published';
+        const isPublished = !isDraft;
+        const icon = type === 'software'
+            ? `<div style="width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#0f173a,#1d2e7b);color:#fff;font-size:0.55rem;font-weight:800;letter-spacing:0.06em;flex-shrink:0">${esc(p.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2))}</div>`
+            : `<div style="width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:#f5f5f7;flex-shrink:0"><i class="ph ph-hard-drives" style="font-size:16px;color:#86868b"></i></div>`;
+        const dragAttrs = isPublished
+            ? ` draggable="true" ondragstart="onOrderDragStart(event,'${type}','${p.id}')" ondragover="onOrderDragOver(event)" ondragleave="onOrderDragLeave(event)" ondrop="onOrderDrop(event,'${type}','${p.id}')" ondragend="onOrderDragEnd(event)"`
+            : '';
+        return `<div class="order-item${isDraft ? ' is-draft' : ' is-draggable'}"${dragAttrs}>
+            ${isPublished ? '<span class="order-grip" title="Drag to reorder"><i class="ph ph-dots-six-vertical" style="font-size:16px"></i></span>' : '<span class="order-grip" style="visibility:hidden"><i class="ph ph-dots-six-vertical" style="font-size:16px"></i></span>'}
+            <div class="order-rank">${isPublished ? idx + 1 : '—'}</div>
+            ${icon}
+            <div class="order-product-info">
+                <div class="order-product-name">${esc(p.name)}</div>
+                <div class="order-product-sub">${esc(p.vendor_name || '—')} · ${esc(p.sub_category || '')}${isDraft ? ' · <span style="color:#f59e0b;font-weight:600">' + esc(p.status.charAt(0).toUpperCase() + p.status.slice(1)) + '</span>' : ''}</div>
+            </div>
+            ${statusBadge(p.status)}
+        </div>`;
+    }).join('')}</div>`;
+}
+
+/* ── Display Order drag-and-drop ── */
+let orderDragPid = null;
+
+function onOrderDragStart(e, type, pid) {
+    orderDragPid = pid;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', pid); } catch (err) { /* ignore */ }
+    e.currentTarget.classList.add('is-dragging');
+}
+
+function onOrderDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    e.currentTarget.classList.add('drag-over');
+}
+
+function onOrderDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+}
+
+function onOrderDragEnd(e) {
+    e.currentTarget.classList.remove('is-dragging');
+    document.querySelectorAll('.order-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+    orderDragPid = null;
+}
+
+function onOrderDrop(e, type, targetPid) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    const pid = orderDragPid;
+    orderDragPid = null;
+    if (!pid || pid === targetPid) return;
+    const published = PRODUCTS
+        .filter(p => p.product_type === type && p.status === 'published')
+        .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
+    const fromIdx = published.findIndex(p => p.id === pid);
+    const toIdx = published.findIndex(p => p.id === targetPid);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = published.splice(fromIdx, 1);
+    published.splice(toIdx, 0, moved);
+    const others = PRODUCTS
+        .filter(p => p.product_type === type && p.status !== 'published')
+        .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
+    [...published, ...others].forEach((p, i) => { p.display_order = i + 1; });
+    logActivity('Reordered', moved.name, `moved to position ${toIdx + 1}`, moved.id);
+    renderDisplayOrder(type);
+    showToast(`${moved.name} moved to position ${toIdx + 1}`);
+}
+
+function renderSettings() {
+    document.getElementById('settings-name').value = currentUser.name;
+    document.getElementById('settings-email').value = currentUser.email;
+    document.getElementById('settings-role').value = 'Super Admin (unrestricted cross-org access)';
+}
+
+function confirmResetDemoData() {
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fef2f2;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-arrow-counter-clockwise" style="font-size:28px;color:#dc2626"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Reset demo data?</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 20px;line-height:1.6">This clears all locally saved changes and restores the original demo data. The page will reload.</p>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="Store.reset()" class="btn-primary" style="background:#dc2626"><i class="ph ph-arrow-counter-clockwise"></i> Reset Demo Data</button>
+            </div>
+        </div>`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PRODUCT HISTORY (per-product timeline)
+// ═══════════════════════════════════════════════════════════════════
+
+function renderProductHistory(p) {
+    if (!p.history || !p.history.length) return `
+        <div style="border-top:1px solid var(--border-light);margin-top:32px;padding-top:32px">
+            <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">History</div>
+            <div style="font-size:13px;color:#c7c7cc;font-style:italic">No history recorded yet.</div>
+        </div>`;
+    const actionColors = {
+        'Created': '#2563eb', 'Updated': '#1d1d1f', 'Published': '#059669',
+        'Unpublished': '#d97706', 'Archived': '#7c3aed', 'Restored': '#059669', 'Deleted': '#dc2626',
+    };
+    const actionIcons = {
+        'Created': 'ph-plus-circle', 'Updated': 'ph-pencil-simple', 'Published': 'ph-arrow-line-up',
+        'Unpublished': 'ph-arrow-line-down', 'Archived': 'ph-archive', 'Restored': 'ph-arrow-counter-clockwise', 'Deleted': 'ph-trash',
+    };
+    return `
+        <div style="border-top:1px solid var(--border-light);margin-top:32px;padding-top:32px">
+            <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">History</div>
+            <div style="display:flex;flex-direction:column;gap:0;position:relative;padding-left:20px">
+                <div style="position:absolute;left:7px;top:6px;bottom:6px;width:1px;background:var(--border-light)"></div>
+                ${p.history.slice(0, 15).map(h => {
+                    const color = actionColors[h.action] || '#86868b';
+                    const icon = actionIcons[h.action] || 'ph-info';
+                    const d = new Date(h.timestamp);
+                    const timeStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                    return `<div style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;position:relative">
+                        <div style="position:absolute;left:-20px;top:10px;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid ${color};display:flex;align-items:center;justify-content:center;z-index:1"><i class="ph ${icon}" style="font-size:8px;color:${color}"></i></div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:13px;font-weight:600;color:${color}">${esc(h.action)}${h.detail ? ' <span style="font-weight:400;color:#86868b">· ' + esc(h.detail) + '</span>' : ''}</div>
+                            <div style="font-size:11px;color:#c7c7cc;margin-top:2px">${esc(h.user || 'System')} · ${timeStr}</div>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ACTIVITY LOG (global)
+// ═══════════════════════════════════════════════════════════════════
+
+function renderActivityLog() {
+    const target = document.getElementById('activity-log-list');
+    if (!target) return;
+    if (!ACTIVITY_LOG.length) {
+        target.innerHTML = `<div style="text-align:center;padding:48px 0">
+            <i class="ph ph-clock-counter-clockwise" style="font-size:2.5rem;color:#c7c7cc;display:block;margin-bottom:12px"></i>
+            <div style="font-size:14px;color:#86868b;font-weight:500">No activity yet</div>
+            <div style="font-size:12px;color:#c7c7cc;margin-top:4px">Actions like publish, archive, and delete will appear here.</div>
+        </div>`;
+        return;
+    }
+    const actionIcons = {
+        'Published': { icon: 'ph-arrow-line-up', color: '#059669', bg: '#ecfdf5' },
+        'Unpublished': { icon: 'ph-arrow-line-down', color: '#d97706', bg: '#fff7ed' },
+        'Archived': { icon: 'ph-archive', color: '#7c3aed', bg: '#f3f0ff' },
+        'Restored': { icon: 'ph-arrow-counter-clockwise', color: '#059669', bg: '#ecfdf5' },
+        'Deleted': { icon: 'ph-trash', color: '#dc2626', bg: '#fef2f2' },
+        'Created': { icon: 'ph-plus-circle', color: '#2563eb', bg: '#eff6ff' },
+        'Updated': { icon: 'ph-pencil-simple', color: '#1d1d1f', bg: '#f5f5f7' },
+    };
+    target.innerHTML = `<div style="border:1px solid var(--border-light);border-radius:12px;overflow:hidden">${ACTIVITY_LOG.map((log, i) => {
+        const a = actionIcons[log.action] || { icon: 'ph-info', color: '#86868b', bg: '#f5f5f7' };
+        const time = new Date(log.timestamp);
+        const timeStr = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        return `<div style="display:flex;align-items:center;gap:14px;padding:14px 18px;${i < ACTIVITY_LOG.length - 1 ? 'border-bottom:1px solid var(--border-light)' : ''};background:${i % 2 === 0 ? '#fff' : '#fafbfc'}">
+            <div style="width:34px;height:34px;border-radius:10px;background:${a.bg};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ph ${a.icon}" style="font-size:16px;color:${a.color}"></i></div>
+            <div style="flex:1;min-width:0">
+                <div style="font-size:13.5px;font-weight:600;color:#1d1d1f"><span style="color:${a.color}">${esc(log.action)}</span> · ${esc(log.productName)}</div>
+                ${log.detail ? `<div style="font-size:12px;color:#86868b;margin-top:1px">${esc(log.detail)}</div>` : ''}
+            </div>
+            <div style="font-size:11px;color:#c7c7cc;font-weight:500;flex-shrink:0;font-variant-numeric:tabular-nums">${timeStr}</div>
+        </div>`;
+    }).join('')}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        if (sdBackdrop?.classList.contains('is-open')) closeSwPreview();
+        else if (document.getElementById('modal-root').innerHTML) closeModal();
+    }
+});
+
+// Auto-login as Super Admin
+initPortal();
