@@ -280,9 +280,10 @@ function archiveProduct(pid, force = false) {
         if (!force) { showHwCompatConflictModal(pid, 'Archive', `closeModal();archiveProduct('${pid}', true)`); return; }
         removeCompatRefs(pid);
     }
+    const prevLabel = p.status === 'published' ? 'Published' : 'Draft';
     p.status = 'archived';
     p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Archived', p.name, 'Archived from Published');
+    logActivity('Archived', p.name, `Archived from ${prevLabel}`);
     showToast(`${p.name} archived`, 'info');
     reRenderCurrentList();
 }
