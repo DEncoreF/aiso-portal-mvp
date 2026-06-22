@@ -31,7 +31,6 @@ function statusBadge(s) {
     const m = {
         published: '<span class="badge badge-published">Published</span>',
         draft: '<span class="badge badge-draft">Draft</span>',
-        unpublished: '<span class="badge badge-unpublished">Unpublished</span>',
         archived: '<span class="badge badge-archived">Archived</span>',
     };
     return m[s] || `<span class="badge badge-zinc">${esc(s)}</span>`;
@@ -202,14 +201,14 @@ function applySorting(list, type) {
 function renderStatsBar(containerId, all) {
     const target = document.getElementById(containerId);
     if (!target) return;
-    const counts = { total: all.length, published: 0, draft: 0, unpublished: 0, archived: 0 };
+    const counts = { total: all.length, published: 0, draft: 0, archived: 0 };
     all.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++; });
     const chip = (label, count, color) => `<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;background:#fafbfc;border:1px solid var(--border-light);min-width:0">
         <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>
         <span style="font-size:12px;font-weight:600;color:#1d1d1f">${count}</span>
         <span style="font-size:11px;color:#86868b;font-weight:500">${label}</span>
     </div>`;
-    target.innerHTML = chip('Total', counts.total, '#1d1d1f') + chip('Published', counts.published, '#059669') + chip('Draft', counts.draft, '#6b7280') + chip('Unpublished', counts.unpublished, '#d97706') + (counts.archived ? chip('Archived', counts.archived, '#7c3aed') : '');
+    target.innerHTML = chip('Total', counts.total, '#1d1d1f') + chip('Published', counts.published, '#059669') + chip('Draft', counts.draft, '#6b7280') + (counts.archived ? chip('Archived', counts.archived, '#7c3aed') : '');
 }
 
 // ── Confirm Unpublish ──
@@ -265,9 +264,9 @@ function doUnpublish(pid, force = false) {
         if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `doUnpublish('${pid}', true)`); return; }
         removeCompatRefs(pid);
     }
-    p.status = 'unpublished';
+    p.status = 'draft';
     p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Unpublished', p.name);
+    logActivity('Unpublished', p.name, 'Removed from storefront — back to Draft');
     closeModal();
     showToast(`${p.name} has been unpublished`, 'info');
     reRenderCurrentList();
@@ -281,10 +280,9 @@ function archiveProduct(pid, force = false) {
         if (!force) { showHwCompatConflictModal(pid, 'Archive', `closeModal();archiveProduct('${pid}', true)`); return; }
         removeCompatRefs(pid);
     }
-    const prev = p.status;
     p.status = 'archived';
     p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Archived', p.name, `was ${prev}`);
+    logActivity('Archived', p.name, 'Archived from Published');
     showToast(`${p.name} archived`, 'info');
     reRenderCurrentList();
 }
@@ -294,7 +292,7 @@ function restoreProduct(pid) {
     if (!p) return;
     p.status = 'draft';
     p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Restored', p.name, 'to draft');
+    logActivity('Restored', p.name, 'Restored to Draft');
     showToast(`${p.name} restored as draft`, 'success');
     reRenderCurrentList();
 }
@@ -329,7 +327,7 @@ function doDeleteProduct(pid, force = false) {
     }
     const name = p.name;
     PRODUCTS.splice(PRODUCTS.indexOf(p), 1);
-    logActivity('Deleted', name, 'permanently removed');
+    logActivity('Deleted', name, 'Product permanently removed');
     closeModal();
     showToast(`${name} permanently deleted`, 'error');
     reRenderCurrentList();
@@ -404,9 +402,9 @@ function togglePublish(pid, force = false) {
             if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `closeModal();togglePublish('${pid}', true)`); return; }
             removeCompatRefs(pid);
         }
-        p.status = 'unpublished';
+        p.status = 'draft';
         p.updated_at = new Date().toISOString().slice(0, 10);
-        logActivity('Unpublished', p.name);
+        logActivity('Unpublished', p.name, 'Removed from storefront — back to Draft');
         showToast(`${p.name} has been unpublished`, 'info');
     } else {
         if (p.product_type === 'software') {
@@ -423,7 +421,7 @@ function togglePublish(pid, force = false) {
         }
         p.status = 'published';
         p.updated_at = new Date().toISOString().slice(0, 10);
-        logActivity('Published', p.name);
+        logActivity('Published', p.name, 'Listed on storefront');
         showToast(`${p.name} is now published!`, 'success');
     }
     reRenderCurrentList();
@@ -1698,7 +1696,7 @@ function createProduct(type) {
     }
 
     PRODUCTS.push(newP);
-    logActivity('Created', name, `${type} · draft`);
+    logActivity('Created', name, 'New draft created');
     closeModal();
     showToast(`${name} created as draft`, 'success');
     navigate(isSW ? 'sw-products' : 'hw-products');
@@ -1790,7 +1788,7 @@ function showEditProductModal(pid) {
                     return `<label class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[#1d1d1f] ${isUnpub ? 'opacity-60' : 'cursor-pointer hover:bg-[#f5f5f7]'} transition">
                     <input type="checkbox" value="${esc(h.id)}" class="w-4 h-4 accent-aiso" ${(p.compatible_hardware || []).includes(h.id) ? 'checked' : ''} ${isUnpub ? 'disabled' : ''}>
                     <i class="ph ph-hard-drives text-aiso"></i>
-                    <span class="font-semibold text-[#1d1d1f]">${esc(h.name)}${isUnpub ? ' <span style="color:#d97706;font-weight:500">(unpublished)</span>' : ''}</span>
+                    <span class="font-semibold text-[#1d1d1f]">${esc(h.name)}${isUnpub ? ' <span style="color:#d97706;font-weight:500">(not published)</span>' : ''}</span>
                     <span class="ml-auto text-xs text-[#86868b]">${esc(h.model || h.sub_category || '')}</span>
                 </label>`;
                 }).join('')}
@@ -2190,16 +2188,16 @@ function saveProduct(pid) {
     // Reset edit image state
     editSwImages = []; editSwIcon = null; editHwImage = null;
 
-    // Editing a live (published) product sends it back to Unpublished so the
-    // change is re-reviewed before it goes live again. Drafts / unpublished /
+    // Editing a live (published) product sends it back to Draft so the
+    // change must be re-published before it goes live again. Drafts /
     // archived keep their status.
     const wasPublished = p.status === 'published';
-    if (wasPublished) p.status = 'unpublished';
+    if (wasPublished) p.status = 'draft';
 
-    logActivity('Updated', p.name, isSW ? 'software' : 'hardware');
-    if (wasPublished) logActivity('Unpublished', p.name, 'Edited while live — re-publish required');
+    logActivity('Updated', p.name, 'Draft updated');
+    if (wasPublished) logActivity('Unpublished', p.name, 'Edited while live — moved to Draft, re-publish to go live');
     closeModal();
-    showToast(wasPublished ? `${p.name} updated — moved to Unpublished. Re-publish to make it live.` : `${p.name} updated`, 'success');
+    showToast(wasPublished ? `${p.name} updated — moved to Draft. Re-publish to make it live.` : `${p.name} updated`, 'success');
     if (isSW) { renderSwProducts(); showSwDetail(pid); }
     else { renderHwProducts(); showHwDetail(pid); }
 }
@@ -2469,7 +2467,7 @@ function renderProductHistory(p) {
         'Unpublished': '#d97706', 'Archived': '#7c3aed', 'Restored': '#059669', 'Deleted': '#dc2626',
     };
     const actionIcons = {
-        'Created': 'ph-plus-circle', 'Updated': 'ph-pencil-simple', 'Published': 'ph-arrow-line-up',
+        'Created': 'ph-plus-circle', 'Updated': 'ph-pencil-simple', 'Published': 'ph-rocket-launch',
         'Unpublished': 'ph-arrow-line-down', 'Archived': 'ph-archive', 'Restored': 'ph-arrow-counter-clockwise', 'Deleted': 'ph-trash',
     };
     return `
@@ -2510,7 +2508,7 @@ function renderActivityLog() {
         return;
     }
     const actionIcons = {
-        'Published': { icon: 'ph-arrow-line-up', color: '#059669', bg: '#ecfdf5' },
+        'Published': { icon: 'ph-rocket-launch', color: '#059669', bg: '#ecfdf5' },
         'Unpublished': { icon: 'ph-arrow-line-down', color: '#d97706', bg: '#fff7ed' },
         'Archived': { icon: 'ph-archive', color: '#7c3aed', bg: '#f3f0ff' },
         'Restored': { icon: 'ph-arrow-counter-clockwise', color: '#059669', bg: '#ecfdf5' },
