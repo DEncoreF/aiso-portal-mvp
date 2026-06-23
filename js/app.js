@@ -146,7 +146,6 @@ function renderSwProducts() {
             <td>${statusBadge(p.status)}</td>
             <td class="text-right" onclick="event.stopPropagation()">
                 <div class="flex items-center gap-0.5 justify-end">
-                    <button onclick="showSwPreview('${p.id}')" class="btn-ghost" title="Preview"><i class="ph ph-eye"></i></button>
                     <button onclick="showEditProductModal('${p.id}')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>
                     ${productActionBtns(p)}
                 </div>
@@ -375,7 +374,6 @@ function renderHwProducts() {
             <td>${statusBadge(p.status)}</td>
             <td class="text-right" onclick="event.stopPropagation()">
                 <div class="flex items-center gap-0.5 justify-end">
-                    <button onclick="showHwPreview('${p.id}')" class="btn-ghost" title="Preview"><i class="ph ph-eye"></i></button>
                     <button onclick="showEditProductModal('${p.id}')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>
                     ${productActionBtns(p)}
                 </div>
@@ -532,7 +530,6 @@ function showSwDetail(pid) {
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-                <button onclick="showSwPreview('${p.id}')" class="btn-secondary"><i class="ph ph-eye"></i> Preview</button>
                 ${canEdit ? `<button onclick="showEditProductModal('${p.id}')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
                 ${canEdit && p.status === 'published' ? `<button onclick="confirmUnpublish('${p.id}')" class="btn-secondary" style="color:#d97706"><i class="ph ph-arrow-down"></i> Unpublish</button>` : ''}
                 ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showSwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
@@ -613,7 +610,6 @@ function showHwDetail(pid) {
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-                <button onclick="showHwPreview('${p.id}')" class="btn-secondary"><i class="ph ph-eye"></i> Preview</button>
                 ${canEdit ? `<button onclick="showEditProductModal('${p.id}')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
                 ${canEdit && p.status === 'published' ? `<button onclick="confirmUnpublish('${p.id}')" class="btn-secondary" style="color:#d97706"><i class="ph ph-arrow-down"></i> Unpublish</button>` : ''}
                 ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showHwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
@@ -647,12 +643,6 @@ function showHwDetail(pid) {
                     </ul>
                 </section>` : ''}
 
-                ${p.bestFor?.length ? `
-                <div style="border-top:1px solid var(--border-light)"></div>
-                <section style="margin-top:32px">
-                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Best For</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:8px">${p.bestFor.map(b => '<span class="badge badge-blue">' + esc(b) + '</span>').join('')}</div>
-                </section>` : ''}
             </div>
 
             <div>
