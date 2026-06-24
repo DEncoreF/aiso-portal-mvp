@@ -845,17 +845,6 @@ function getMatchingVendorId(vendorName, vendorType) {
     return org ? org.id : null;
 }
 
-function renderHardwareSpecInputs() {
-    return Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => `
-        <div class="flex items-center gap-3">
-            <div class="w-6 text-right text-xs font-bold text-[#86868b]">${i + 1}</div>
-            <div class="relative flex-1">
-                <input id="new-p-spec-${i}" class="input-field pr-14" maxlength="${HW_KEY_SPEC_MAX_CHARS}" placeholder="${i < HW_KEY_SPEC_MIN_ITEMS ? 'Required' : 'Optional'}">
-                <span id="new-p-spec-${i}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">0/${HW_KEY_SPEC_MAX_CHARS}</span>
-            </div>
-        </div>`).join('');
-}
-
 function renderSoftwareFeatureInputs() {
     return Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => `
         <div class="relative">
@@ -865,7 +854,29 @@ function renderSoftwareFeatureInputs() {
 }
 
 function collectHardwareSpecs() {
-    return Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => valueOf(`new-p-spec-${i}`)).filter(Boolean);
+    return collectNsItems('new-p-spec');
+}
+
+// Standard Key Specs use the same dynamic Add-button machinery as non-standard,
+// but count only their own single list (not a combined Platform+Spec total).
+function updateSpecCounter() {
+    const count = document.getElementById('new-p-spec-list')?.querySelectorAll('.ns-row').length || 0;
+    const el = document.getElementById('spec-item-counter');
+    if (el) {
+        el.textContent = `${count} / ${HW_KEY_SPEC_MAX_ITEMS} items used`;
+        el.style.color = count >= HW_KEY_SPEC_MAX_ITEMS ? '#ff3b30' : '#86868b';
+    }
+}
+
+function addSpecRow() {
+    const container = document.getElementById('new-p-spec-list');
+    if (!container) return;
+    const existing = container.querySelectorAll('.ns-row').length;
+    if (existing >= HW_KEY_SPEC_MAX_ITEMS) { showToast('Max 8 items reached', 'error'); return; }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = nsRowHtml(`new-p-spec-${existing}`, 'e.g. Intel Xeon 6730P 32 Core', '', 'updateSpecCounter()', 'renderHardwareCreatePreview()');
+    container.appendChild(tmp.firstElementChild);
+    updateSpecCounter();
 }
 
 function collectSoftwareFeatures() {
@@ -1168,6 +1179,27 @@ function updateEditNsCounter() {
     }
 }
 
+/* ── Edit modal standard Key Specs (Add-button list, single list) ── */
+function updateEditSpecCounter() {
+    const count = document.getElementById('edit-p-spec-list')?.querySelectorAll('.ns-row').length || 0;
+    const el = document.getElementById('edit-spec-item-counter');
+    if (el) {
+        el.textContent = `${count} / ${HW_KEY_SPEC_MAX_ITEMS} items used`;
+        el.style.color = count >= HW_KEY_SPEC_MAX_ITEMS ? '#ff3b30' : '#86868b';
+    }
+}
+
+function addEditSpecRow() {
+    const container = document.getElementById('edit-p-spec-list');
+    if (!container) return;
+    const existing = container.querySelectorAll('.ns-row').length;
+    if (existing >= HW_KEY_SPEC_MAX_ITEMS) { showToast('Max 8 items reached', 'error'); return; }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = nsRowHtml(`edit-p-spec-${existing}`, 'e.g. Intel Xeon 6730P 32 Core', '', 'updateEditSpecCounter()', "renderEditPreview('hardware')");
+    container.appendChild(tmp.firstElementChild);
+    updateEditSpecCounter();
+}
+
 function renderHardwareCreatePreview() {
     const fmt = getHwFormat();
     const name = valueOf('new-p-name') || 'Product Name';
@@ -1348,11 +1380,6 @@ function setupCreateProductBindings(type) {
     form.querySelectorAll('input, textarea, select').forEach(el => {
         el.addEventListener('input', () => {
             setCreateError(el.id, '');
-            if (el.id.startsWith('new-p-spec-')) {
-                const idx = el.id.replace('new-p-spec-', '');
-                const cnt = document.getElementById(`new-p-spec-${idx}-count`);
-                if (cnt) cnt.textContent = `${el.value.length}/${HW_KEY_SPEC_MAX_CHARS}`;
-            }
             if (el.id.startsWith('new-p-feature-')) {
                 const idx = el.id.replace('new-p-feature-', '');
                 const cnt = document.getElementById(`new-p-feature-${idx}-count`);
@@ -1366,6 +1393,7 @@ function setupCreateProductBindings(type) {
         });
     });
     renderImageStatus(type);
+    if (type === 'hardware') updateSpecCounter();
     rerender();
 }
 
@@ -1395,11 +1423,11 @@ function validateCreateProductForm(type) {
                 setCreateError('new-p-specs', '');
             }
         } else {
-            // Non-standard: at least 1 item in either platform or specs
+            // Non-standard: at least HW_KEY_SPEC_MIN_ITEMS items combined across platform + specs
             const platforms = collectNsItems('new-p-platform');
             const nsSpecs = collectNsItems('new-p-nsspec');
-            if (platforms.length + nsSpecs.length === 0) {
-                setCreateError('new-p-ns', 'At least 1 item in Processor/Platform or Key Specifications is required.');
+            if (platforms.length + nsSpecs.length < HW_KEY_SPEC_MIN_ITEMS) {
+                setCreateError('new-p-ns', `At least ${HW_KEY_SPEC_MIN_ITEMS} items across Processor/Platform and Key Specifications are required.`);
                 ok = false;
             } else {
                 setCreateError('new-p-ns', '');
@@ -1471,12 +1499,18 @@ function showCreateProductModal(type) {
             </div>`)}
         ${createFormSection('ph-sliders-horizontal', 'Key Specifications', 'The first three populated rows are required for draft creation.', `
         <div>
-            <div class="mb-3">
-                <div class="field-label">Key Specifications <span class="text-red-400">*</span></div>
-                <div class="field-hint">Min ${HW_KEY_SPEC_MIN_ITEMS} required · Max ${HW_KEY_SPEC_MAX_ITEMS} · ${HW_KEY_SPEC_MAX_CHARS} chars each</div>
-                <div id="new-p-specs-error" class="field-error-text"></div>
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <div class="field-label" style="margin:0">Key Specifications <span class="text-red-400">*</span></div>
+                    <div class="field-hint">Min ${HW_KEY_SPEC_MIN_ITEMS} required · Max ${HW_KEY_SPEC_MAX_ITEMS} · ${HW_KEY_SPEC_MAX_CHARS} chars each</div>
+                </div>
+                <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addSpecRow()"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
             </div>
-            <div class="space-y-2">${renderHardwareSpecInputs()}</div>
+            <div id="new-p-spec-list" class="space-y-2">
+                ${Array.from({ length: HW_KEY_SPEC_MIN_ITEMS }, (_, i) => nsRowHtml('new-p-spec-' + i, 'e.g. Intel Xeon 6730P 32 Core', '', 'updateSpecCounter()', 'renderHardwareCreatePreview()')).join('')}
+            </div>
+            <div id="spec-item-counter" style="margin-top:8px;font-size:11px;font-weight:600;color:#86868b">0 / ${HW_KEY_SPEC_MAX_ITEMS} items used</div>
+            <div id="new-p-specs-error" class="field-error-text"></div>
         </div>`)}
         </div>
 
@@ -1488,6 +1522,7 @@ function showCreateProductModal(type) {
                     <div class="field-label" style="margin:0">Processor / Platform</div>
                     <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addNsRow('platform')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
                 </div>
+                <div class="field-hint" style="margin-bottom:8px">Processor / Platform and Key Specifications share a combined max of ${HW_NS_MAX_ITEMS} (min ${HW_KEY_SPEC_MIN_ITEMS}).</div>
                 <div id="new-p-platform-list" class="space-y-2">
                     ${nsRowHtml('new-p-platform-0', 'e.g. NVIDIA RTX A6000', '', 'updateNsCounter()', 'renderHardwareCreatePreview()')}
                 </div>
@@ -1498,6 +1533,7 @@ function showCreateProductModal(type) {
                     <div class="field-label" style="margin:0">Key Specifications</div>
                     <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addNsRow('spec')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
                 </div>
+                <div class="field-hint" style="margin-bottom:8px">Processor / Platform and Key Specifications share a combined max of ${HW_NS_MAX_ITEMS} (min ${HW_KEY_SPEC_MIN_ITEMS}).</div>
                 <div id="new-p-nsspec-list" class="space-y-2">
                     ${nsRowHtml('new-p-nsspec-0', 'e.g. Max. GPU x8', '', 'updateNsCounter()', 'renderHardwareCreatePreview()')}
                 </div>
@@ -1708,16 +1744,9 @@ function showEditProductModal(pid) {
         </div>`;
     }).join('');
 
-    const specInputs = Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => {
-        const val = (p.key_specifications || [])[i] || '';
-        return `<div class="flex items-center gap-2">
-            <span class="text-xs text-[#86868b] font-bold w-5 text-center">${i + 1}</span>
-            <div class="relative flex-1">
-                <input id="edit-p-spec-${i}" type="text" maxlength="${HW_KEY_SPEC_MAX_CHARS}" class="input-field pr-14 w-full" value="${esc(val)}" placeholder="${i < 3 ? 'Required' : 'Optional'}" oninput="updateCharCounter('edit-p-spec-${i}')">
-                <span id="edit-p-spec-${i}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">${val.length}/${HW_KEY_SPEC_MAX_CHARS}</span>
-            </div>
-        </div>`;
-    }).join('');
+    const editStdSpecs = (p.product_format || 'standard') === 'standard' ? (p.key_specifications || []) : [];
+    const specInputs = (editStdSpecs.length ? editStdSpecs : ['']).map((v, i) =>
+        nsRowHtml(`edit-p-spec-${i}`, 'e.g. Intel Xeon 6730P 32 Core', v, 'updateEditSpecCounter()', "renderEditPreview('hardware')")).join('');
 
     const swFields = `
         ${createFormSection('ph-identification-card', 'Basic Info', 'Core product identity.', `
@@ -1820,11 +1849,15 @@ function showEditProductModal(pid) {
         `)}
         ${isStandardHw ? createFormSection('ph-sliders-horizontal', 'Key Specifications', 'Displayed as bullet points on the storefront card.', `
             <div>
-                <div class="mb-3">
-                    <div class="field-label">Key Specifications</div>
-                    <div class="field-hint">Min ${HW_KEY_SPEC_MIN_ITEMS} required · Max ${HW_KEY_SPEC_MAX_ITEMS} · ${HW_KEY_SPEC_MAX_CHARS} chars each</div>
+                <div class="flex items-center justify-between mb-2">
+                    <div>
+                        <div class="field-label" style="margin:0">Key Specifications</div>
+                        <div class="field-hint">Min ${HW_KEY_SPEC_MIN_ITEMS} required · Max ${HW_KEY_SPEC_MAX_ITEMS} · ${HW_KEY_SPEC_MAX_CHARS} chars each</div>
+                    </div>
+                    <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addEditSpecRow()"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
                 </div>
-                <div class="space-y-2">${specInputs}</div>
+                <div id="edit-p-spec-list" class="space-y-2">${specInputs}</div>
+                <div id="edit-spec-item-counter" style="margin-top:8px;font-size:11px;font-weight:600;color:#86868b"></div>
             </div>
         `) : `
         ${createFormSection('ph-cpu', 'Processor / Platform', 'Supported processors and platforms.', `
@@ -1833,6 +1866,7 @@ function showEditProductModal(pid) {
                     <div class="field-label" style="margin:0">Processor / Platform</div>
                     <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addEditNsRow('platform')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
                 </div>
+                <div class="field-hint" style="margin-bottom:8px">Processor / Platform and Key Specifications share a combined max of ${HW_NS_MAX_ITEMS} (min ${HW_KEY_SPEC_MIN_ITEMS}).</div>
                 <div id="edit-p-platform-list" class="space-y-2">${editNsPlatformRows}</div>
             </div>`)}
         ${createFormSection('ph-sliders-horizontal', 'Key Specifications', 'Technical specifications.', `
@@ -1841,6 +1875,7 @@ function showEditProductModal(pid) {
                     <div class="field-label" style="margin:0">Key Specifications</div>
                     <button type="button" class="btn-ghost" style="font-size:12px;padding:3px 8px" onclick="addEditNsRow('spec')"><i class="ph ph-plus" style="font-size:11px"></i> Add</button>
                 </div>
+                <div class="field-hint" style="margin-bottom:8px">Processor / Platform and Key Specifications share a combined max of ${HW_NS_MAX_ITEMS} (min ${HW_KEY_SPEC_MIN_ITEMS}).</div>
                 <div id="edit-p-nsspec-list" class="space-y-2">${editNsSpecRows}</div>
                 <div id="edit-ns-item-counter" style="margin-top:8px;font-size:11px;font-weight:600;color:#86868b"></div>
             </div>`)}
@@ -1909,6 +1944,8 @@ function showEditProductModal(pid) {
         setVal('edit-p-model', p.model);
         updateCharCounter('edit-p-brand');
         updateCharCounter('edit-p-model');
+        if ((p.product_format || 'standard') === 'standard') updateEditSpecCounter();
+        else updateEditNsCounter();
     }
     // Render existing images status
     if (isSW) renderEditSwImageStatus(p);
@@ -2139,8 +2176,13 @@ function saveProduct(pid) {
     if (!isSW && (p.product_format || 'standard') === 'standard') {
         if (!val('edit-p-brand')) { showToast('Brand is required', 'error'); setCreateError('edit-p-brand', 'Required'); return; }
         if (!val('edit-p-model')) { showToast('Model is required', 'error'); setCreateError('edit-p-model', 'Required'); return; }
-        const editSpecs = Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => val(`edit-p-spec-${i}`)).filter(Boolean);
+        const editSpecs = collectNsItems('edit-p-spec');
         if (editSpecs.length < HW_KEY_SPEC_MIN_ITEMS) { showToast(`At least ${HW_KEY_SPEC_MIN_ITEMS} specifications required`, 'error'); return; }
+    }
+    if (isNsHw) {
+        if (collectNsItems('edit-p-platform').length + collectNsItems('edit-p-nsspec').length < HW_KEY_SPEC_MIN_ITEMS) {
+            showToast(`At least ${HW_KEY_SPEC_MIN_ITEMS} items across Processor/Platform and Key Specifications`, 'error'); return;
+        }
     }
 
     p.name = val('edit-p-name') || p.name;
@@ -2163,7 +2205,7 @@ function saveProduct(pid) {
         if (hwFmt === 'standard') {
             p.brand = val('edit-p-brand') || p.brand;
             p.model = val('edit-p-model') || p.model;
-            p.key_specifications = Array.from({ length: HW_KEY_SPEC_MAX_ITEMS }, (_, i) => val(`edit-p-spec-${i}`)).filter(Boolean);
+            p.key_specifications = collectNsItems('edit-p-spec');
         } else {
             p.ns_platforms = collectNsItems('edit-p-platform');
             p.key_specifications = collectNsItems('edit-p-nsspec');
