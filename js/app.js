@@ -577,7 +577,6 @@ function showHwDetail(pid) {
 
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:32px">
             <div style="display:flex;align-items:center;gap:16px">
-                ${p.image_data ? `<img src="${p.image_data}" alt="${esc(p.name)}" style="width:48px;height:48px;border-radius:14px;object-fit:cover;flex-shrink:0">` : `<div style="width:48px;height:48px;border-radius:14px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#86868b">${esc(p.name.slice(0,2).toUpperCase())}</div>`}
                 <div>
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                         <h2 style="font-size:1.4rem;font-weight:700;letter-spacing:-0.03em;margin:0">${esc(p.name)}</h2>
