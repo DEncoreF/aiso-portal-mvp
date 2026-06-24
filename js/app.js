@@ -207,7 +207,7 @@ function renderStatsBar(containerId, all) {
         <span style="font-size:12px;font-weight:600;color:#1d1d1f">${count}</span>
         <span style="font-size:11px;color:#86868b;font-weight:500">${label}</span>
     </div>`;
-    target.innerHTML = chip('Total', counts.total, '#1d1d1f') + chip('Published', counts.published, '#059669') + chip('Draft', counts.draft, '#6b7280') + (counts.archived ? chip('Archived', counts.archived, '#7c3aed') : '');
+    target.innerHTML = chip('Total', counts.total, '#1d1d1f') + chip('Published', counts.published, '#059669') + chip('Draft', counts.draft, '#6b7280') + chip('Archived', counts.archived, '#7c3aed');
 }
 
 // ── Confirm Unpublish ──
@@ -359,13 +359,8 @@ function renderHwProducts() {
     document.getElementById('hw-products-tbody').innerHTML = list.length ? list.map(p => `
         <tr class="cursor-pointer" onclick="if(!event.target.closest('button'))showHwDetail('${p.id}')">
             <td>
-                <div class="flex items-center gap-3">
-                    <div style="width:36px;height:36px;border-radius:10px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#86868b;flex-shrink:0">${esc(p.name.slice(0,2).toUpperCase())}</div>
-                    <div>
-                        <div style="font-weight:600;font-size:13.5px;color:#1d1d1f">${esc(p.name)}</div>
-                        <div style="font-size:12px;color:#86868b;margin-top:1px">${esc(p.model || '')}</div>
-                    </div>
-                </div>
+                <div style="font-weight:600;font-size:13.5px;color:#1d1d1f">${esc(p.name)}</div>
+                ${(p.product_format || 'standard') === 'standard' ? `<div style="font-size:12px;color:#86868b;margin-top:1px">${esc([p.brand, p.model].filter(Boolean).join(' · '))}</div>` : ''}
             </td>
             <td><span style="color:#86868b;font-size:13px">${esc(p.vendor_name || '—')}</span></td>
             <td><span class="badge badge-zinc">${esc(p.sub_category || 'Hardware')}</span></td>
