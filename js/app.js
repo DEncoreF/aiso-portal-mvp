@@ -412,10 +412,12 @@ function togglePublish(pid, force = false) {
                 return !hw || hw.status !== 'published';
             });
             if (staleIds.length) {
-                if (!force) { showSwPublishConflictModal(pid, staleIds); return; }
+                // Hard invariant: a SW can only reference published HW (enforced by the published-only
+                // picker + ref-stripping on every HW takedown). Unreachable in normal flow — drop
+                // silently as a data-integrity backstop, no prompt.
                 const staleNames = staleIds.map(hid => PRODUCTS.find(x => x.id === hid)?.name || hid);
                 p.compatible_hardware = p.compatible_hardware.filter(hid => !staleIds.includes(hid));
-                logActivity('Compatibility removed', p.name, `unpublished hardware removed on publish: ${staleNames.join(', ')}`, p.id);
+                logActivity('Compatibility removed', p.name, `not-published hardware removed on publish: ${staleNames.join(', ')}`, p.id);
             }
         }
         p.status = 'published';
@@ -424,24 +426,6 @@ function togglePublish(pid, force = false) {
         showToast(`${p.name} is now published!`, 'success');
     }
     reRenderCurrentList();
-}
-
-// Confirm modal shown when publishing a SW product that references non-published hardware.
-function showSwPublishConflictModal(pid, staleIds) {
-    const p = PRODUCTS.find(x => x.id === pid);
-    const staleNames = staleIds.map(hid => PRODUCTS.find(x => x.id === hid)?.name || hid);
-    showModal(`
-        <div style="text-align:center;padding:1rem 0">
-            <div style="width:56px;height:56px;border-radius:16px;background:#fff7ed;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#d97706"></i></div>
-            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Publish "${esc(p?.name || '')}"?</h3>
-            <p style="font-size:13px;color:#86868b;margin:0 0 12px;line-height:1.6">This product references unpublished hardware:</p>
-            <div style="font-size:13px;font-weight:600;color:#1d1d1f;margin:0 0 12px;line-height:1.8">${staleNames.map(n => esc(n)).join('<br>')}</div>
-            <p style="font-size:13px;color:#86868b;margin:0 0 24px;line-height:1.6">They will be removed from this product's compatible hardware on publish.</p>
-            <div style="display:flex;gap:10px;justify-content:center">
-                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
-                <button onclick="closeModal();togglePublish('${pid}', true)" class="btn-primary" style="background:#d97706"><i class="ph ph-arrow-line-up"></i> Publish Anyway</button>
-            </div>
-        </div>`);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2183,12 +2167,23 @@ function saveProduct(pid) {
     // change must be re-published before it goes live again. Drafts /
     // archived keep their status.
     const wasPublished = p.status === 'published';
-    if (wasPublished) p.status = 'draft';
+    let strippedRefs = 0;
+    if (wasPublished) {
+        p.status = 'draft';
+        // A referenced HW reverting to Draft would leave stale SW compatibility refs;
+        // strip them now (same cleanup as unpublish/archive/delete) so nothing dangles.
+        if (p.product_type === 'hardware') {
+            strippedRefs = findCompatRefs(p.id).length;
+            if (strippedRefs) removeCompatRefs(p.id);
+        }
+    }
 
     logActivity('Updated', p.name, 'Draft updated');
     if (wasPublished) logActivity('Unpublished', p.name, 'Edited while live — moved to Draft, re-publish to go live');
     closeModal();
-    showToast(wasPublished ? `${p.name} updated — moved to Draft. Re-publish to make it live.` : `${p.name} updated`, 'success');
+    showToast(wasPublished
+        ? `${p.name} updated — moved to Draft${strippedRefs ? `, removed from ${strippedRefs} software` : ''}. Re-publish to make it live.`
+        : `${p.name} updated`, 'success');
     if (isSW) { renderSwProducts(); showSwDetail(pid); }
     else { renderHwProducts(); showHwDetail(pid); }
 }
