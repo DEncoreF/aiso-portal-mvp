@@ -604,10 +604,10 @@ function showHwDetail(pid) {
 
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:48px">
             <div>
-                <section style="margin-bottom:32px">
+                ${p.short_description ? `<section style="margin-bottom:32px">
                     <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px">Description</div>
                     <p style="font-size:14px;color:#1d1d1f;line-height:1.7">${esc(p.short_description)}</p>
-                </section>
+                </section>` : ''}
 
                 ${(p.product_format || 'standard') !== 'standard' && (p.ns_platforms || []).length ? `
                 <div style="border-top:1px solid var(--border-light)"></div>
@@ -779,9 +779,15 @@ function createField(id, label, opts = {}) {
     const placeholder = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
     const type = opts.type || 'text';
     const value = opts.value ? ` value="${esc(opts.value)}"` : '';
+    const input = opts.maxlength
+        ? `<div class="relative">
+            <input id="${id}" type="${type}" class="input-field pr-14" ${opts.required ? 'required' : ''}${max}${placeholder}${value} oninput="updateCharCounter('${id}')">
+            <span id="${id}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b] pointer-events-none">${(opts.value || '').length}/${opts.maxlength}</span>
+        </div>`
+        : `<input id="${id}" type="${type}" class="input-field" ${opts.required ? 'required' : ''}${max}${placeholder}${value}>`;
     return `<div class="${opts.wrapClass || ''}">
         <label for="${id}" class="field-label">${label}${required}</label>
-        <input id="${id}" type="${type}" class="input-field" ${opts.required ? 'required' : ''}${max}${placeholder}${value}>
+        ${input}
         ${opts.hint ? `<div class="field-hint">${esc(opts.hint)}</div>` : ''}
         <div id="${id}-error" class="field-error-text"></div>
     </div>`;
@@ -791,9 +797,11 @@ function createTextArea(id, label, opts = {}) {
     const required = opts.required ? ' <span class="req">*</span>' : '';
     const max = opts.maxlength ? ` maxlength="${opts.maxlength}"` : '';
     const placeholder = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
+    const oninput = opts.maxlength ? ` oninput="updateCharCounter('${id}')"` : '';
     return `<div class="${opts.wrapClass || ''}">
         <label for="${id}" class="field-label">${label}${required}</label>
-        <textarea id="${id}" rows="${opts.rows || 3}" class="input-field" ${opts.required ? 'required' : ''}${max}${placeholder}></textarea>
+        <textarea id="${id}" rows="${opts.rows || 3}" class="input-field" ${opts.required ? 'required' : ''}${max}${placeholder}${oninput}></textarea>
+        ${opts.maxlength ? `<div id="${id}-count" class="field-hint" style="text-align:right">0/${opts.maxlength}</div>` : ''}
         ${opts.hint ? `<div class="field-hint">${esc(opts.hint)}</div>` : ''}
         <div id="${id}-error" class="field-error-text"></div>
     </div>`;
@@ -1350,7 +1358,6 @@ function setupCreateProductBindings(type) {
                 const cnt = document.getElementById(`new-p-feature-${idx}-count`);
                 if (cnt) cnt.textContent = `${el.value.length}/${SOFTWARE_FEATURE_MAX_CHARS}`;
             }
-            if (el.id === 'new-p-pitch') updateCharCounter('new-p-pitch');
             rerender();
         });
         el.addEventListener('change', () => {
@@ -1537,7 +1544,6 @@ function showCreateProductModal(type) {
         `)}
         ${createFormSection('ph-chat-centered-text', 'Positioning', 'Customer-facing copy, category, and feature bullets.', `
         ${createTextArea('new-p-pitch', 'Short Pitch', { maxlength: 300, rows: 2, placeholder: 'One-line pitch...' })}
-        <div id="new-p-pitch-count" class="field-hint" style="margin-top:-4px">0/300</div>
         <div>
             <div class="field-label mb-3">Category <span class="req">*</span> <span class="text-[10px] text-[#86868b] font-bold" style="margin-left:4px">Max ${SW_CATEGORY_MAX}</span></div>
             ${renderSwCategoryChecks('new-p-categories')}
@@ -1630,7 +1636,7 @@ function createProduct(type) {
         name,
         brand: isSW ? vendorName : valueOf('new-p-brand'),
         sub_category: isSW ? (newCategories[0] || '') : valueOf('new-p-product-type'),
-        short_description: isSW ? valueOf('new-p-desc') : '',
+        short_description: '',
         status: 'draft',
         display_order: PRODUCTS.filter(p => p.product_type === type).length + 1,
         created_at: today,
@@ -1695,7 +1701,10 @@ function showEditProductModal(pid) {
         const val = (p.features || [])[i] || '';
         return `<div class="flex items-center gap-2">
             <span class="text-xs text-[#86868b] font-bold w-5 text-center">${i + 1}</span>
-            <input id="edit-p-feat-${i}" type="text" maxlength="150" class="input-field flex-1" value="${esc(val)}" placeholder="${i < 1 ? 'e.g. Core capability...' : 'Optional'}">
+            <div class="relative flex-1">
+                <input id="edit-p-feat-${i}" type="text" maxlength="${SOFTWARE_FEATURE_MAX_CHARS}" class="input-field pr-14 w-full" value="${esc(val)}" placeholder="${i < 1 ? 'e.g. Core capability...' : 'Optional'}" oninput="updateCharCounter('edit-p-feat-${i}')">
+                <span id="edit-p-feat-${i}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">${val.length}/${SOFTWARE_FEATURE_MAX_CHARS}</span>
+            </div>
         </div>`;
     }).join('');
 
@@ -1703,7 +1712,10 @@ function showEditProductModal(pid) {
         const val = (p.key_specifications || [])[i] || '';
         return `<div class="flex items-center gap-2">
             <span class="text-xs text-[#86868b] font-bold w-5 text-center">${i + 1}</span>
-            <input id="edit-p-spec-${i}" type="text" maxlength="${HW_KEY_SPEC_MAX_CHARS}" class="input-field flex-1" value="${esc(val)}" placeholder="${i < 3 ? 'Required' : 'Optional'}">
+            <div class="relative flex-1">
+                <input id="edit-p-spec-${i}" type="text" maxlength="${HW_KEY_SPEC_MAX_CHARS}" class="input-field pr-14 w-full" value="${esc(val)}" placeholder="${i < 3 ? 'Required' : 'Optional'}" oninput="updateCharCounter('edit-p-spec-${i}')">
+                <span id="edit-p-spec-${i}-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b]">${val.length}/${HW_KEY_SPEC_MAX_CHARS}</span>
+            </div>
         </div>`;
     }).join('');
 
@@ -1718,7 +1730,6 @@ function showEditProductModal(pid) {
                 ${renderSwCategoryChecks('edit-p-categories', getSwCategories(p))}
             </div>
             ${createField('edit-p-tagline', 'Short Pitch', { maxlength: 300 })}
-            <div id="edit-p-tagline-count" class="field-hint" style="margin-top:-4px">0/300</div>
             <div>
                 <div class="flex items-center justify-between mb-3">
                     <div class="field-label">Key Features</div>
@@ -1806,7 +1817,6 @@ function showEditProductModal(pid) {
                 ${createField('edit-p-brand', 'Brand', { required: true, maxlength: 50 })}
                 ${createField('edit-p-model', 'Model', { required: true, maxlength: 50 })}
             </div>` : ''}
-            ${createTextArea('edit-p-desc', 'Description', { maxlength: 500, rows: 3 })}
         `)}
         ${isStandardHw ? createFormSection('ph-sliders-horizontal', 'Key Specifications', 'Displayed as bullet points on the storefront card.', `
             <div>
@@ -1888,15 +1898,17 @@ function showEditProductModal(pid) {
     const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
     setVal('edit-p-name', p.name);
     setVal('edit-p-vendor', p.vendor_name);
-    setVal('edit-p-desc', p.short_description);
+    updateCharCounter('edit-p-name');
+    updateCharCounter('edit-p-vendor');
     if (isSW) {
         setVal('edit-p-tagline', p.tagline);
         updateCharCounter('edit-p-tagline');
-        document.getElementById('edit-p-tagline')?.addEventListener('input', () => updateCharCounter('edit-p-tagline'));
         updateSwCategoryLimit('edit-p-categories');
     } else {
         setVal('edit-p-brand', p.brand);
         setVal('edit-p-model', p.model);
+        updateCharCounter('edit-p-brand');
+        updateCharCounter('edit-p-model');
     }
     // Render existing images status
     if (isSW) renderEditSwImageStatus(p);
@@ -2133,7 +2145,6 @@ function saveProduct(pid) {
 
     p.name = val('edit-p-name') || p.name;
     if (!isNsHw) p.vendor_name = val('edit-p-vendor') || p.vendor_name;
-    p.short_description = val('edit-p-desc') || p.short_description;
     p.updated_at = new Date().toISOString().slice(0, 10);
 
     if (isSW) {
@@ -2282,9 +2293,13 @@ function renderParamTagList(containerId, dataArr, prefix) {
             `).join('')}
         </div>
         <div class="flex items-center gap-2">
-            <input id="${prefix}-new-input" type="text" maxlength="50" placeholder="Add new item..."
-                class="border border-[#e8eaed] rounded-lg px-3 py-1.5 text-sm flex-1 max-w-xs focus:border-aiso focus:outline-none"
-                onkeydown="if(event.key==='Enter'){event.preventDefault();addParamTag('${prefix}')}">
+            <div class="relative flex-1 max-w-xs">
+                <input id="${prefix}-new-input" type="text" maxlength="50" placeholder="Add new item..."
+                    class="border border-[#e8eaed] rounded-lg px-3 py-1.5 pr-14 text-sm w-full focus:border-aiso focus:outline-none"
+                    oninput="updateCharCounter('${prefix}-new-input')"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addParamTag('${prefix}')}">
+                <span id="${prefix}-new-input-count" class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#86868b] pointer-events-none">0/50</span>
+            </div>
             <button type="button" class="btn-primary py-1.5 px-3 text-xs" onclick="addParamTag('${prefix}')">
                 <i class="ph ph-plus"></i> Add
             </button>
