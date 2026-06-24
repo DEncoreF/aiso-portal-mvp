@@ -598,11 +598,6 @@ function showHwDetail(pid) {
 
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:48px">
             <div>
-                ${p.short_description ? `<section style="margin-bottom:32px">
-                    <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px">Description</div>
-                    <p style="font-size:14px;color:#1d1d1f;line-height:1.7">${esc(p.short_description)}</p>
-                </section>` : ''}
-
                 ${(p.product_format || 'standard') !== 'standard' && (p.ns_platforms || []).length ? `
                 <div style="border-top:1px solid var(--border-light)"></div>
                 <section style="margin-top:32px;margin-bottom:32px">
