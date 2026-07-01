@@ -552,8 +552,11 @@
 
     <!-- ============== MAIN CONTENT ============== -->
     <main id="main-content" class="ml-[240px]" style="padding: 2.5rem 3rem">
-        <div id="top-bar" style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-            <div style="position:relative">
+        <div id="top-bar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+            <div id="page-heading"></div>
+            <div style="display:flex;align-items:center;gap:14px">
+                <div id="page-action"></div>
+                <div style="position:relative">
                 <button id="user-menu-btn" onclick="toggleUserMenu(event)" aria-label="Account menu" style="display:inline-flex;align-items:center;gap:10px;height:40px;padding:0 8px 0 14px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer">
                     <span style="text-align:right;line-height:1.15">
                         <span id="user-name" style="display:block;font-size:13px;font-weight:600;color:#1d1d1f">—</span>
@@ -570,16 +573,13 @@
                         <i class="ph ph-check" style="font-size:15px;color:#1432E6"></i>
                     </div>
                 </div>
+                </div>
             </div>
         </div>
         <div id="view-container">
 
             <!-- ====== SOFTWARE PRODUCTS ====== -->
             <div id="view-sw-products" class="view hidden">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-                    <h2 class="text-2xl font-bold" style="letter-spacing:-0.03em">Software Products</h2>
-                    <button onclick="showCreateProductModal('software')" class="btn-primary" id="sw-create-btn"><i class="ph ph-plus"></i> Add Software</button>
-                </div>
                 <div id="sw-stats-bar" style="display:flex;gap:12px;margin-bottom:16px"></div>
                 <div class="filter-bar">
                     <div class="filter-tabs" id="sw-filter-tabs">
@@ -606,10 +606,6 @@
 
             <!-- ====== HARDWARE PRODUCTS ====== -->
             <div id="view-hw-products" class="view hidden">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-                    <h2 class="text-2xl font-bold" style="letter-spacing:-0.03em">Hardware Products</h2>
-                    <button onclick="showCreateProductModal('hardware')" class="btn-primary" id="hw-create-btn"><i class="ph ph-plus"></i> Add Hardware</button>
-                </div>
                 <div id="hw-stats-bar" style="display:flex;gap:12px;margin-bottom:16px"></div>
                 <div class="filter-bar">
                     <div class="filter-tabs" id="hw-filter-tabs">
@@ -646,8 +642,6 @@
 
             <!-- ====== SETTINGS ====== -->
             <div id="view-param-center" class="view hidden">
-                <h2 class="text-2xl font-bold mb-1" style="letter-spacing:-0.03em">Parameter Center</h2>
-                <p class="text-sm mb-6" style="color:#86868b">System-level parameters managed exclusively by Super Admin.</p>
 
                 <div class="flex gap-2 mb-5">
                     <button class="tab-btn active" data-param-tab="sw" onclick="switchParamTab('sw')"><i class="ph ph-app-window"></i> Software Parameters</button>
@@ -716,19 +710,11 @@
 
             <!-- ====== ACTIVITY LOG ====== -->
             <div id="view-activity-log" class="view hidden">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-                    <div>
-                        <h2 class="text-2xl font-bold" style="letter-spacing:-0.03em">Activity Log</h2>
-                        <p class="text-sm mt-1" style="color:#86868b">Recent actions performed in this session.</p>
-                    </div>
-                    <button onclick="ACTIVITY_LOG=[];Store.save();renderActivityLog();showToast('Log cleared')" class="btn-secondary"><i class="ph ph-trash"></i> Clear</button>
-                </div>
                 <div id="activity-log-list"></div>
             </div>
 
             <div id="view-settings" class="view hidden">
                 <div class="w-full max-w-xl">
-                    <h2 class="text-2xl font-bold mb-6" style="letter-spacing:-0.03em">Settings</h2>
                     <div class="card p-8 space-y-6">
                         <div>
                             <label class="block text-xs font-bold text-[#86868b] uppercase tracking-wider mb-2">Display Name</label>

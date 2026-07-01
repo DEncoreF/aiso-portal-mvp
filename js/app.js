@@ -129,6 +129,13 @@ function forgotPassword() {
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════════
 
+function setPageHeader(title, subtitle, actionHtml) {
+    const h = document.getElementById('page-heading');
+    if (h) h.innerHTML = title ? `<h2 class="text-2xl font-bold" style="letter-spacing:-0.03em">${esc(title)}</h2>${subtitle ? `<p class="text-sm mt-1" style="color:#86868b">${esc(subtitle)}</p>` : ''}` : '';
+    const a = document.getElementById('page-action');
+    if (a) a.innerHTML = actionHtml || '';
+}
+
 function navigate(key) {
     currentView = key;
     // Toggle views
@@ -140,6 +147,16 @@ function navigate(key) {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     const active = document.querySelector(`.nav-item[data-nav="${key}"]`);
     if (active) active.classList.add('active');
+
+    // Shared header (title + optional subtitle + per-view action)
+    const meta = {
+        'sw-products': { title: 'Software Products', action: `<button onclick="showCreateProductModal('software')" class="btn-primary" id="sw-create-btn"><i class="ph ph-plus"></i> Add Software</button>` },
+        'hw-products': { title: 'Hardware Products', action: `<button onclick="showCreateProductModal('hardware')" class="btn-primary" id="hw-create-btn"><i class="ph ph-plus"></i> Add Hardware</button>` },
+        'param-center': { title: 'Parameter Center', subtitle: 'System-level parameters managed exclusively by Super Admin.' },
+        'activity-log': { title: 'Activity Log', subtitle: 'Recent actions performed in this session.', action: `<button onclick="ACTIVITY_LOG=[];Store.save();renderActivityLog();showToast('Log cleared')" class="btn-secondary"><i class="ph ph-trash"></i> Clear</button>` },
+        'settings': { title: 'Settings' },
+    }[key] || {};
+    setPageHeader(meta.title || '', meta.subtitle || '', meta.action || '');
 
     // Render
     if (key === 'sw-products') renderSwProducts();
@@ -607,6 +624,7 @@ function showSwDetail(pid) {
     `;
     document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
     document.getElementById('view-sw-detail').classList.remove('hidden');
+    setPageHeader('', '', '');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -683,6 +701,7 @@ function showHwDetail(pid) {
     `;
     document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
     document.getElementById('view-hw-detail').classList.remove('hidden');
+    setPageHeader('', '', '');
 }
 
 // ═══════════════════════════════════════════════════════════════════
