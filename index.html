@@ -510,6 +510,31 @@
 </head>
 <body class="min-h-screen">
 
+    <!-- ============== LOGIN SCREEN ============== -->
+    <div id="login-screen" style="position:fixed;inset:0;z-index:60;background:#f5f7fd;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem">
+        <!-- Lockup -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem">
+            <img src="images/logo-aiso.svg" alt="AISO" style="height:30px">
+            <span style="background:#eef1ff;color:#1432E6;font-size:12px;font-weight:600;padding:2px 10px;border-radius:980px">Portal</span>
+        </div>
+        <!-- Card -->
+        <div style="background:#fff;border-radius:16px;padding:2.5rem;max-width:480px;width:100%;box-shadow:0 10px 40px rgba(8,15,38,0.08)">
+            <form onsubmit="event.preventDefault();login()">
+                <label class="field-label" for="login-email">Email</label>
+                <input id="login-email" class="input-field" type="email" placeholder="Enter your account email" autocomplete="username">
+                <div style="height:1rem"></div>
+                <label class="field-label" for="login-password">Password</label>
+                <input id="login-password" class="input-field" type="password" placeholder="Enter your password" autocomplete="current-password">
+                <div id="login-error" class="field-error-text"></div>
+                <button type="submit" class="btn-primary" style="width:100%;justify-content:center;background:#1432E6;padding:0.7rem;margin-top:0.5rem">Enter Portal</button>
+            </form>
+            <div style="text-align:center;margin-top:1rem">
+                <a href="#" onclick="event.preventDefault();forgotPassword()" style="color:#1432E6;font-size:12px;font-weight:600;text-decoration:none">Forget Password?</a>
+            </div>
+        </div>
+        <div style="margin-top:1rem;color:#86868b;font-size:12px">Demo access — root@aiso.com / aiso1234</div>
+    </div>
+
     <!-- ============== SIDEBAR ============== -->
     <aside id="sidebar" class="fixed left-0 top-0 bottom-0 w-[240px] z-40 flex flex-col" style="background:#1d1d1f">
         <div class="px-5 py-5" style="border-bottom:1px solid rgba(255,255,255,0.08)">
@@ -518,23 +543,17 @@
                 <span style="width:1px;height:14px;background:rgba(255,255,255,0.25)"></span>
                 <span class="text-[11px] font-semibold uppercase" style="color:rgba(255,255,255,0.55);letter-spacing:0.18em">Portal</span>
             </div>
-            <div class="text-[10px] font-medium tracking-wider uppercase mt-2" style="color:rgba(255,255,255,0.35)" id="header-role-chip">—</div>
         </div>
         <nav id="dynamic-nav" class="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto"></nav>
-        <div class="px-4 py-3" style="border-top:1px solid rgba(255,255,255,0.08)">
-            <div class="flex items-center gap-3">
-                <div id="user-avatar" class="w-7 h-7 rounded-full text-[10px] font-bold flex items-center justify-center" style="background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.7)">—</div>
-                <div class="flex-1 min-w-0">
-                    <div id="user-name" class="text-xs font-medium truncate" style="color:rgba(255,255,255,0.8)">—</div>
-                    <div id="user-role" class="text-[10px] truncate" style="color:rgba(255,255,255,0.35)">—</div>
-                </div>
-                <span class="text-[9px] font-semibold px-2 py-0.5 rounded" style="background:rgba(255,59,48,0.15);color:#ff6961">ROOT</span>
-            </div>
-        </div>
     </aside>
 
     <!-- ============== MAIN CONTENT ============== -->
     <main id="main-content" class="ml-[240px]" style="padding: 2.5rem 3rem">
+        <div id="top-bar" style="display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-bottom:20px">
+            <div style="text-align:right"><div id="user-name" style="font-size:13px;font-weight:600;color:#1d1d1f">—</div><div id="user-role" style="font-size:11px;color:#86868b">—</div></div>
+            <div id="user-avatar" style="width:34px;height:34px;border-radius:50%;background:#eef1ff;color:#1432E6;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center">—</div>
+            <button onclick="logout()" class="btn-secondary"><i class="ph ph-sign-out"></i> Logout</button>
+        </div>
         <div id="view-container">
 
             <!-- ====== SOFTWARE PRODUCTS ====== -->

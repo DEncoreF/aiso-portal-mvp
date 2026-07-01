@@ -57,12 +57,40 @@ function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 // LOGIN / LOGOUT
 // ═══════════════════════════════════════════════════════════════════
 
+// Login does NOT persist — every page load shows the login screen (in-memory only).
 function initPortal() {
+    currentUser = null;
+    const screen = document.getElementById('login-screen');
+    if (screen) screen.style.display = 'flex';
+    const emailEl = document.getElementById('login-email');
+    const pwEl = document.getElementById('login-password');
+    const errEl = document.getElementById('login-error');
+    if (emailEl) emailEl.value = '';
+    if (pwEl) pwEl.value = '';
+    if (errEl) errEl.textContent = '';
+    if (emailEl) emailEl.focus();
+}
+
+function login() {
+    const email = (document.getElementById('login-email').value || '').trim();
+    const password = (document.getElementById('login-password').value || '').trim();
+    const errEl = document.getElementById('login-error');
+    if (email.toLowerCase() === DEMO_LOGIN.email.toLowerCase() && password === DEMO_LOGIN.password) {
+        if (errEl) errEl.textContent = '';
+        enterApp();
+    } else {
+        if (errEl) errEl.textContent = 'Invalid email or password.';
+    }
+}
+
+function enterApp() {
     currentUser = { ...SUPER_ADMIN_USER };
+    const screen = document.getElementById('login-screen');
+    if (screen) screen.style.display = 'none';
+
     document.getElementById('user-name').textContent = currentUser.name;
     document.getElementById('user-role').textContent = currentUser.label;
     document.getElementById('user-avatar').textContent = getUserInitials(currentUser.name);
-    document.getElementById('header-role-chip').textContent = 'Super Admin';
 
     // Build nav
     const navEl = document.getElementById('dynamic-nav');
@@ -75,6 +103,25 @@ function initPortal() {
 
     // Navigate to first
     navigate(NAV_ITEMS[0].key);
+}
+
+function logout() {
+    closeModal();
+    if (typeof closeSwPreview === 'function') closeSwPreview();
+    currentUser = null;
+    const screen = document.getElementById('login-screen');
+    if (screen) screen.style.display = 'flex';
+    const emailEl = document.getElementById('login-email');
+    const pwEl = document.getElementById('login-password');
+    const errEl = document.getElementById('login-error');
+    if (emailEl) emailEl.value = '';
+    if (pwEl) pwEl.value = '';
+    if (errEl) errEl.textContent = '';
+    if (emailEl) emailEl.focus();
+}
+
+function forgotPassword() {
+    showToast('Please contact your administrator to reset your password.', 'info');
 }
 
 // ═══════════════════════════════════════════════════════════════════

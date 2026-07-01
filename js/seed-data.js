@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 const SUPER_ADMIN_USER = { role: 'SUPER_ADMIN', name: 'System Root', email: 'root@aiso.com', label: 'Super Admin', avatar: 'SA' };
+const DEMO_LOGIN = { email: 'root@aiso.com', password: 'aiso1234' };
 
 const ORGS = [
     { id: 'v-phison', name: 'Phison Electronics', type: 'vendor', vendor_type: 'hardware', status: 'active',
