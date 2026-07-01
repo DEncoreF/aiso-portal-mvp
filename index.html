@@ -521,12 +521,16 @@
         <div style="background:#fff;border-radius:16px;padding:2.5rem;max-width:480px;width:100%;box-shadow:0 10px 40px rgba(8,15,38,0.08)">
             <form onsubmit="event.preventDefault();login()">
                 <label class="field-label" for="login-email">Email</label>
-                <input id="login-email" class="input-field" type="email" placeholder="Enter your account email" autocomplete="username">
-                <div style="height:1rem"></div>
+                <input id="login-email" class="input-field" type="email" placeholder="Enter your account email" autocomplete="username" maxlength="100" onblur="validateLoginField('email')" oninput="onLoginInput('email')">
+                <div id="login-email-error" class="field-error-text"></div>
+                <div style="height:0.75rem"></div>
                 <label class="field-label" for="login-password">Password</label>
-                <input id="login-password" class="input-field" type="password" placeholder="Enter your password" autocomplete="current-password">
-                <div id="login-error" class="field-error-text"></div>
-                <button type="submit" class="btn-primary" style="width:100%;justify-content:center;background:#1432E6;padding:0.7rem;margin-top:0.5rem">Enter Portal</button>
+                <div style="position:relative">
+                    <input id="login-password" class="input-field" type="password" placeholder="Enter your password" autocomplete="current-password" maxlength="100" style="padding-right:2.4rem" onblur="validateLoginField('password')" oninput="onLoginInput('password')">
+                    <button type="button" onclick="toggleLoginPassword()" aria-label="Show password" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#86868b"><i class="ph ph-eye" id="login-pw-eye"></i></button>
+                </div>
+                <div id="login-password-error" class="field-error-text"></div>
+                <button id="login-submit" type="submit" class="btn-primary" style="width:100%;justify-content:center;background:#1432E6;padding:0.7rem;margin-top:0.5rem" disabled>Enter Portal</button>
             </form>
             <div style="text-align:center;margin-top:1rem">
                 <a href="#" onclick="event.preventDefault();forgotPassword()" style="color:#1432E6;font-size:12px;font-weight:600;text-decoration:none">Forget Password?</a>
@@ -546,7 +550,25 @@
         </div>
         <nav id="dynamic-nav" class="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto"></nav>
         <div class="px-3 py-4" style="border-top:1px solid rgba(255,255,255,0.08)">
-            <button onclick="logout()" class="nav-item" style="width:100%"><span class="nav-icon"><i class="ph ph-sign-out"></i></span><span>Logout</span></button>
+            <div style="position:relative">
+                <button id="user-menu-btn" onclick="toggleUserMenu(event)" aria-label="Account menu" style="display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);cursor:pointer">
+                    <span id="user-avatar" style="width:30px;height:30px;border-radius:50%;background:#eef1ff;color:#1432E6;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">—</span>
+                    <span style="flex:1;min-width:0;text-align:left">
+                        <span id="user-name" style="display:block;color:rgba(255,255,255,0.9);font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</span>
+                        <span id="user-role" style="display:block;color:rgba(255,255,255,0.45);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</span>
+                    </span>
+                    <i class="ph ph-caret-down" style="font-size:14px;color:rgba(255,255,255,0.5)" id="user-menu-caret"></i>
+                </button>
+                <div id="user-menu-dropdown" style="display:none;position:absolute;bottom:52px;left:0;right:0;background:#fff;border:1px solid var(--border);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,0.25);z-index:50">
+                    <div style="font-size:10px;color:#c7c7cc;text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 4px">Role</div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:#eef1ff">
+                        <i class="ph ph-shield-check" style="font-size:18px;color:#1432E6"></i>
+                        <span style="flex:1;font-size:13px;font-weight:600;color:#1432E6">Super Admin</span>
+                        <i class="ph ph-check" style="font-size:15px;color:#1432E6"></i>
+                    </div>
+                </div>
+            </div>
+            <button onclick="logout()" class="nav-item" style="width:100%;margin-top:6px"><span class="nav-icon"><i class="ph ph-sign-out"></i></span><span>Logout</span></button>
         </div>
     </aside>
 
@@ -556,24 +578,6 @@
             <div id="page-heading"></div>
             <div style="display:flex;align-items:center;gap:14px">
                 <div id="page-action"></div>
-                <div style="position:relative">
-                <button id="user-menu-btn" onclick="toggleUserMenu(event)" aria-label="Account menu" style="display:inline-flex;align-items:center;gap:10px;height:40px;padding:0 8px 0 14px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer">
-                    <span style="text-align:right;line-height:1.15">
-                        <span id="user-name" style="display:block;font-size:13px;font-weight:600;color:#1d1d1f">—</span>
-                        <span id="user-role" style="display:block;font-size:11px;color:#86868b">—</span>
-                    </span>
-                    <span id="user-avatar" style="width:30px;height:30px;border-radius:50%;background:#eef1ff;color:#1432E6;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">—</span>
-                    <i class="ph ph-caret-down" style="font-size:14px;color:#86868b" id="user-menu-caret"></i>
-                </button>
-                <div id="user-menu-dropdown" style="display:none;position:absolute;top:48px;right:0;min-width:200px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(8,15,38,0.12);z-index:50">
-                    <div style="font-size:10px;color:#c7c7cc;text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 4px">Role</div>
-                    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:#eef1ff">
-                        <i class="ph ph-shield-check" style="font-size:18px;color:#1432E6"></i>
-                        <span style="flex:1;font-size:13px;font-weight:600;color:#1432E6">Super Admin</span>
-                        <i class="ph ph-check" style="font-size:15px;color:#1432E6"></i>
-                    </div>
-                </div>
-                </div>
             </div>
         </div>
         <div id="view-container">

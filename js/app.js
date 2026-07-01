@@ -58,28 +58,108 @@ function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 // ═══════════════════════════════════════════════════════════════════
 
 // Login does NOT persist — every page load shows the login screen (in-memory only).
+function clearLoginFields() {
+    const emailEl = document.getElementById('login-email');
+    const pwEl = document.getElementById('login-password');
+    if (emailEl) { emailEl.value = ''; emailEl.classList.remove('field-error'); }
+    if (pwEl) { pwEl.value = ''; pwEl.classList.remove('field-error'); }
+    const emailErr = document.getElementById('login-email-error');
+    const pwErr = document.getElementById('login-password-error');
+    if (emailErr) emailErr.textContent = '';
+    if (pwErr) pwErr.textContent = '';
+    // Reset password visibility
+    if (pwEl) pwEl.type = 'password';
+    const eye = document.getElementById('login-pw-eye');
+    if (eye) eye.className = 'ph ph-eye';
+}
+
 function initPortal() {
     currentUser = null;
     const screen = document.getElementById('login-screen');
     if (screen) screen.style.display = 'flex';
+    clearLoginFields();
+    updateLoginSubmitState();
     const emailEl = document.getElementById('login-email');
-    const pwEl = document.getElementById('login-password');
-    const errEl = document.getElementById('login-error');
-    if (emailEl) emailEl.value = '';
-    if (pwEl) pwEl.value = '';
-    if (errEl) errEl.textContent = '';
     if (emailEl) emailEl.focus();
 }
 
+// ── Login field validation ──
+function validateLoginEmail(v) {
+    if (!v) return 'Email is required.';
+    if (v.length > 100) return 'Email must be 100 characters or fewer.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return 'Enter a valid email address.';
+    return '';
+}
+function validateLoginPassword(v) {
+    if (!v) return 'Password is required.';
+    if (v.length > 100) return 'Password must be 100 characters or fewer.';
+    return '';
+}
+
+function validateLoginField(which) {
+    const input = document.getElementById('login-' + which);
+    const errEl = document.getElementById('login-' + which + '-error');
+    if (!input) return '';
+    const v = (input.value || '').trim();
+    const msg = which === 'email' ? validateLoginEmail(v) : validateLoginPassword(v);
+    if (errEl) errEl.textContent = msg;
+    input.classList.toggle('field-error', !!msg);
+    updateLoginSubmitState();
+    return msg;
+}
+
+function onLoginInput(which) {
+    const input = document.getElementById('login-' + which);
+    const errEl = document.getElementById('login-' + which + '-error');
+    // If the field currently shows an error, re-run to clear it live when valid
+    if (errEl && errEl.textContent) {
+        const v = (input.value || '').trim();
+        const msg = which === 'email' ? validateLoginEmail(v) : validateLoginPassword(v);
+        if (!msg) { errEl.textContent = ''; input.classList.remove('field-error'); }
+    }
+    updateLoginSubmitState();
+}
+
+function updateLoginSubmitState() {
+    const emailEl = document.getElementById('login-email');
+    const pwEl = document.getElementById('login-password');
+    const btn = document.getElementById('login-submit');
+    if (!btn) return;
+    const emailOk = emailEl && !validateLoginEmail((emailEl.value || '').trim());
+    const pwOk = pwEl && !validateLoginPassword((pwEl.value || '').trim());
+    btn.disabled = !(emailOk && pwOk);
+}
+
+function toggleLoginPassword() {
+    const pwEl = document.getElementById('login-password');
+    const eye = document.getElementById('login-pw-eye');
+    if (!pwEl) return;
+    const show = pwEl.type === 'password';
+    pwEl.type = show ? 'text' : 'password';
+    if (eye) eye.className = show ? 'ph ph-eye-slash' : 'ph ph-eye';
+}
+
 function login() {
+    const btn = document.getElementById('login-submit');
+    if (btn && btn.disabled) return;
     const email = (document.getElementById('login-email').value || '').trim();
     const password = (document.getElementById('login-password').value || '').trim();
-    const errEl = document.getElementById('login-error');
+    const emailEl = document.getElementById('login-email');
+    const pwEl = document.getElementById('login-password');
+    const emailErr = document.getElementById('login-email-error');
+    const pwErr = document.getElementById('login-password-error');
     if (email.toLowerCase() === DEMO_LOGIN.email.toLowerCase() && password === DEMO_LOGIN.password) {
-        if (errEl) errEl.textContent = '';
+        if (emailErr) emailErr.textContent = '';
+        if (pwErr) pwErr.textContent = '';
+        if (emailEl) emailEl.classList.remove('field-error');
+        if (pwEl) pwEl.classList.remove('field-error');
         enterApp();
     } else {
-        if (errEl) errEl.textContent = 'Invalid email or password.';
+        const incorrect = 'The Email or Password you entered is incorrect.';
+        if (emailEl) emailEl.classList.add('field-error');
+        if (pwEl) pwEl.classList.add('field-error');
+        if (emailErr) emailErr.textContent = incorrect;
+        if (pwErr) pwErr.textContent = incorrect;
     }
 }
 
@@ -109,15 +189,13 @@ function enterApp() {
 function logout() {
     closeModal();
     if (typeof closeSwPreview === 'function') closeSwPreview();
+    if (typeof closeUserMenu === 'function') closeUserMenu();
     currentUser = null;
     const screen = document.getElementById('login-screen');
     if (screen) screen.style.display = 'flex';
+    clearLoginFields();
+    updateLoginSubmitState();
     const emailEl = document.getElementById('login-email');
-    const pwEl = document.getElementById('login-password');
-    const errEl = document.getElementById('login-error');
-    if (emailEl) emailEl.value = '';
-    if (pwEl) pwEl.value = '';
-    if (errEl) errEl.textContent = '';
     if (emailEl) emailEl.focus();
 }
 
