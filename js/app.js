@@ -74,6 +74,8 @@ function clearLoginFields() {
 }
 
 function initPortal() {
+    // Keep the user logged in across page reloads (cleared on Logout or tab close)
+    try { if (sessionStorage.getItem('aiso-portal-auth') === '1') { enterApp(); return; } } catch (e) {}
     currentUser = null;
     const screen = document.getElementById('login-screen');
     if (screen) screen.style.display = 'flex';
@@ -165,6 +167,7 @@ function login() {
 
 function enterApp() {
     currentUser = { ...SUPER_ADMIN_USER };
+    try { sessionStorage.setItem('aiso-portal-auth', '1'); } catch (e) {}
     if (typeof closeUserMenu === 'function') closeUserMenu();
     const screen = document.getElementById('login-screen');
     if (screen) screen.style.display = 'none';
@@ -187,6 +190,7 @@ function enterApp() {
 }
 
 function logout() {
+    try { sessionStorage.removeItem('aiso-portal-auth'); } catch (e) {}
     closeModal();
     if (typeof closeSwPreview === 'function') closeSwPreview();
     if (typeof closeUserMenu === 'function') closeUserMenu();
