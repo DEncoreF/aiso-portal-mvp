@@ -552,9 +552,25 @@
 
     <!-- ============== MAIN CONTENT ============== -->
     <main id="main-content" class="ml-[240px]" style="padding: 2.5rem 3rem">
-        <div id="top-bar" style="display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-bottom:20px">
-            <div style="text-align:right"><div id="user-name" style="font-size:13px;font-weight:600;color:#1d1d1f">—</div><div id="user-role" style="font-size:11px;color:#86868b">—</div></div>
-            <div id="user-avatar" style="width:34px;height:34px;border-radius:50%;background:#eef1ff;color:#1432E6;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center">—</div>
+        <div id="top-bar" style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+            <div style="position:relative">
+                <button id="user-menu-btn" onclick="toggleUserMenu(event)" aria-label="Account menu" style="display:inline-flex;align-items:center;gap:10px;height:40px;padding:0 8px 0 14px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer">
+                    <span style="text-align:right;line-height:1.15">
+                        <span id="user-name" style="display:block;font-size:13px;font-weight:600;color:#1d1d1f">—</span>
+                        <span id="user-role" style="display:block;font-size:11px;color:#86868b">—</span>
+                    </span>
+                    <span id="user-avatar" style="width:30px;height:30px;border-radius:50%;background:#eef1ff;color:#1432E6;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">—</span>
+                    <i class="ph ph-caret-down" style="font-size:14px;color:#86868b" id="user-menu-caret"></i>
+                </button>
+                <div id="user-menu-dropdown" style="display:none;position:absolute;top:48px;right:0;min-width:200px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(8,15,38,0.12);z-index:50">
+                    <div style="font-size:10px;color:#c7c7cc;text-transform:uppercase;letter-spacing:0.06em;padding:6px 10px 4px">Role</div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:#eef1ff">
+                        <i class="ph ph-shield-check" style="font-size:18px;color:#1432E6"></i>
+                        <span style="flex:1;font-size:13px;font-weight:600;color:#1432E6">Super Admin</span>
+                        <i class="ph ph-check" style="font-size:15px;color:#1432E6"></i>
+                    </div>
+                </div>
+            </div>
         </div>
         <div id="view-container">
 

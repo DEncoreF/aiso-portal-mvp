@@ -85,6 +85,7 @@ function login() {
 
 function enterApp() {
     currentUser = { ...SUPER_ADMIN_USER };
+    if (typeof closeUserMenu === 'function') closeUserMenu();
     const screen = document.getElementById('login-screen');
     if (screen) screen.style.display = 'none';
 
@@ -2616,12 +2617,32 @@ function renderActivityLog() {
 // ═══════════════════════════════════════════════════════════════════
 
 // Keyboard shortcuts
+function toggleUserMenu(e) {
+    if (e) e.stopPropagation();
+    const dd = document.getElementById('user-menu-dropdown');
+    const caret = document.getElementById('user-menu-caret');
+    if (!dd) return;
+    const open = dd.style.display !== 'block';
+    dd.style.display = open ? 'block' : 'none';
+    if (caret) caret.style.transform = open ? 'rotate(180deg)' : '';
+}
+function closeUserMenu() {
+    const dd = document.getElementById('user-menu-dropdown');
+    const caret = document.getElementById('user-menu-caret');
+    if (dd) dd.style.display = 'none';
+    if (caret) caret.style.transform = '';
+}
+
+// Close the account menu on outside click / Escape
+document.addEventListener('click', e => {
+    if (!e.target.closest('#user-menu-btn') && !e.target.closest('#user-menu-dropdown')) closeUserMenu();
+});
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
-        if (sdBackdrop?.classList.contains('is-open')) closeSwPreview();
+        if (document.getElementById('user-menu-dropdown')?.style.display === 'block') closeUserMenu();
+        else if (sdBackdrop?.classList.contains('is-open')) closeSwPreview();
         else if (document.getElementById('modal-root').innerHTML) closeModal();
     }
 });
 
-// Auto-login as Super Admin
 initPortal();
