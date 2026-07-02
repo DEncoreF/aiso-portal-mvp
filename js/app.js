@@ -293,7 +293,7 @@ function renderSwProducts() {
             <td>${statusBadge(p.status)}</td>
             <td class="text-right" onclick="event.stopPropagation()">
                 <div class="flex items-center gap-0.5 justify-end">
-                    ${p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ''}
+                    ${p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}', 'list')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ''}
                     ${productActionBtns(p)}
                 </div>
             </td>
@@ -516,7 +516,7 @@ function renderHwProducts() {
             <td>${statusBadge(p.status)}</td>
             <td class="text-right" onclick="event.stopPropagation()">
                 <div class="flex items-center gap-0.5 justify-end">
-                    ${p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ''}
+                    ${p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}', 'list')" class="btn-ghost" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ''}
                     ${productActionBtns(p)}
                 </div>
             </td>
@@ -656,7 +656,7 @@ function showSwDetail(pid) {
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-                ${canEdit && p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
+                ${canEdit && p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}', 'detail')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
                 ${canEdit && p.status === 'published' ? `<button onclick="confirmUnpublish('${p.id}')" class="btn-secondary" style="color:#d97706"><i class="ph ph-arrow-down"></i> Unpublish</button>` : ''}
                 ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showSwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
                 ${canEdit && p.status !== 'archived' ? `<button onclick="archiveProduct('${p.id}');navigate('sw-products')" class="btn-secondary" style="color:#7c3aed"><i class="ph ph-archive"></i> Archive</button>` : ''}
@@ -736,7 +736,7 @@ function showHwDetail(pid) {
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-                ${canEdit && p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
+                ${canEdit && p.status !== 'archived' ? `<button onclick="showEditProductModal('${p.id}', 'detail')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>` : ''}
                 ${canEdit && p.status === 'published' ? `<button onclick="confirmUnpublish('${p.id}')" class="btn-secondary" style="color:#d97706"><i class="ph ph-arrow-down"></i> Unpublish</button>` : ''}
                 ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showHwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
                 ${canEdit && p.status !== 'archived' ? `<button onclick="archiveProduct('${p.id}');navigate('hw-products')" class="btn-secondary" style="color:#7c3aed"><i class="ph ph-archive"></i> Archive</button>` : ''}
@@ -1857,10 +1857,12 @@ function createProduct(type) {
     navigate(isSW ? 'sw-products' : 'hw-products');
 }
 
-function showEditProductModal(pid) {
+function showEditProductModal(pid, source) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
     if (p.status === 'archived') { showToast('Restore this product before editing', 'info'); return; }
+    // Remember where Edit was opened from so saveProduct can return there.
+    editReturnView = source === 'list' ? 'list' : 'detail';
     editSwImages = []; editSwIcon = null; editHwImage = null; editHwFormat = p.product_format || 'standard';
     const isSW = p.product_type === 'software';
     const publishedHW = PRODUCTS.filter(x => x.product_type === 'hardware' && x.status === 'published');
@@ -2234,6 +2236,8 @@ let editSwImages = [];
 let editSwIcon = null;
 let editHwImage = null;
 let editHwFormat = 'standard';
+// Where to return after saving an edit: 'list' (opened from the list) or 'detail' (opened from the detail page).
+let editReturnView = 'detail';
 
 function renderEditSwImageStatus(p) {
     const container = document.getElementById('edit-p-images-status');
@@ -2376,8 +2380,10 @@ function saveProduct(pid) {
     showToast(wasPublished
         ? `${p.name} updated — moved to Draft${strippedRefs ? `, removed from ${strippedRefs} software` : ''}. Re-publish to make it live.`
         : `${p.name} updated`, 'success');
-    if (isSW) { renderSwProducts(); showSwDetail(pid); }
-    else { renderHwProducts(); showHwDetail(pid); }
+    // Return to wherever Edit was opened from: stay on the list when opened
+    // from the list, or re-open the detail page when opened from the detail.
+    if (isSW) { renderSwProducts(); if (editReturnView === 'detail') showSwDetail(pid); }
+    else { renderHwProducts(); if (editReturnView === 'detail') showHwDetail(pid); }
 }
 
 // ═══════════════════════════════════════════════════════════════════
