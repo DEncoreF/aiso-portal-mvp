@@ -38,8 +38,10 @@ function statusBadge(s) {
 
 function showToast(msg, type = 'success') {
     const el = document.createElement('div');
-    const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' };
-    el.className = `toast-animate text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg ${colors[type] || colors.success}`;
+    // Toasts use only two colors: red for problems/blocks/destructive actions,
+    // green for everything else (successes and neutral confirmations).
+    const isRed = type === 'error' || type === 'warning' || type === 'danger';
+    el.className = `toast-animate text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg ${isRed ? 'bg-red-600' : 'bg-emerald-600'}`;
     el.textContent = msg;
     document.getElementById('toast-root').appendChild(el);
     setTimeout(() => el.remove(), 3000);
@@ -1860,7 +1862,7 @@ function createProduct(type) {
 function showEditProductModal(pid, source) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
-    if (p.status === 'archived') { showToast('Restore this product before editing', 'info'); return; }
+    if (p.status === 'archived') { showToast('Restore this product before editing', 'error'); return; }
     // Remember where Edit was opened from so saveProduct can return there.
     editReturnView = source === 'list' ? 'list' : 'detail';
     editSwImages = []; editSwIcon = null; editHwImage = null; editHwFormat = p.product_format || 'standard';
