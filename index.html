@@ -594,7 +594,7 @@
                     </div>
                     <div class="filter-search">
                         <i class="ph ph-magnifying-glass"></i>
-                        <input id="sw-search" type="text" placeholder="Search..." oninput="renderSwProducts()">
+                        <input id="sw-search" type="text" placeholder="Search..." oninput="resetProductPage('software');renderSwProducts()">
                     </div>
                 </div>
                 <input type="hidden" id="sw-filter-status" value="">
@@ -606,6 +606,7 @@
                         <tbody id="sw-products-tbody"></tbody>
                     </table>
                 </div>
+                <div id="sw-products-pagination"></div>
             </div>
 
             <!-- ====== HARDWARE PRODUCTS ====== -->
@@ -620,7 +621,7 @@
                     </div>
                     <div class="filter-search">
                         <i class="ph ph-magnifying-glass"></i>
-                        <input id="hw-search" type="text" placeholder="Search..." oninput="renderHwProducts()">
+                        <input id="hw-search" type="text" placeholder="Search..." oninput="resetProductPage('hardware');renderHwProducts()">
                     </div>
                 </div>
                 <input type="hidden" id="hw-filter-status" value="">
@@ -632,6 +633,7 @@
                         <tbody id="hw-products-tbody"></tbody>
                     </table>
                 </div>
+                <div id="hw-products-pagination"></div>
             </div>
 
             <!-- ====== PRODUCT DETAIL (SW) ====== -->

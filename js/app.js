@@ -285,15 +285,79 @@ function navigate(key) {
 // SOFTWARE PRODUCT LIST
 // ═══════════════════════════════════════════════════════════════════
 
+const PRODUCT_PAGE_SIZE = 10;
+const productPageState = { software: 1, hardware: 1 };
+
+function resetProductPage(type) {
+    productPageState[type] = 1;
+}
+
+function setProductPage(type, page) {
+    const nextPage = Number.parseInt(page, 10);
+    if (!Number.isFinite(nextPage)) return;
+    productPageState[type] = Math.max(1, nextPage);
+    if (type === 'software') renderSwProducts();
+    else renderHwProducts();
+}
+
+function paginateProductList(list, type) {
+    const totalPages = Math.max(1, Math.ceil(list.length / PRODUCT_PAGE_SIZE));
+    const currentPage = Math.min(Math.max(productPageState[type] || 1, 1), totalPages);
+    productPageState[type] = currentPage;
+    const startIndex = (currentPage - 1) * PRODUCT_PAGE_SIZE;
+    return {
+        currentPage,
+        totalPages,
+        startIndex,
+        items: list.slice(startIndex, startIndex + PRODUCT_PAGE_SIZE),
+    };
+}
+
+function renderProductPagination(type, totalItems, currentPage, totalPages) {
+    const prefix = type === 'software' ? 'sw' : 'hw';
+    const target = document.getElementById(`${prefix}-products-pagination`);
+    if (!target) return;
+    if (totalItems <= PRODUCT_PAGE_SIZE) {
+        target.innerHTML = '';
+        return;
+    }
+
+    const firstItem = (currentPage - 1) * PRODUCT_PAGE_SIZE + 1;
+    const lastItem = Math.min(currentPage * PRODUCT_PAGE_SIZE, totalItems);
+    const pageStart = Math.max(1, Math.min(currentPage - 2, totalPages - 4));
+    const pageEnd = Math.min(totalPages, pageStart + 4);
+    const pageButtons = Array.from({ length: pageEnd - pageStart + 1 }, (_, i) => pageStart + i).map(page =>
+        `<button type="button" onclick="setProductPage('${type}',${page})" class="${page === currentPage ? 'btn-primary' : 'btn-ghost'}" style="min-width:32px;height:32px;padding:0 9px;justify-content:center">${page}</button>`
+    ).join('');
+    const navButton = (label, page, disabled = false) => `<button type="button" ${disabled ? 'disabled' : `onclick="setProductPage('${type}',${page})"`} class="btn-ghost" style="font-size:12px;${disabled ? 'opacity:.35;cursor:not-allowed' : ''}">${label}</button>`;
+
+    target.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 4px;border-top:1px solid var(--border-light);flex-wrap:wrap">
+        <span style="font-size:12px;color:#86868b;font-weight:500">${firstItem}-${lastItem} of ${totalItems} items</span>
+        <div style="display:flex;align-items:center;gap:4px">
+            ${navButton('« First', 1, currentPage === 1)}
+            ${navButton('‹ Prev', currentPage - 1, currentPage === 1)}
+            ${pageButtons}
+            ${navButton('Next ›', currentPage + 1, currentPage === totalPages)}
+            ${navButton('Last »', totalPages, currentPage === totalPages)}
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:#86868b;font-weight:500">Go to Page
+            <input type="number" min="1" max="${totalPages}" value="${currentPage}" aria-label="Go to page" onchange="setProductPage('${type}',Math.min(Math.max(this.value,1),${totalPages}))" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" class="input-field" style="width:58px;padding:6px 8px;margin:0;text-align:center">
+            <span>/ ${totalPages}</span>
+        </label>
+    </div>`;
+}
+
 function setSwFilter(val) {
     document.getElementById('sw-filter-status').value = val;
     document.querySelectorAll('#sw-filter-tabs .filter-tab').forEach(b => b.classList.toggle('active', b.dataset.val === val));
+    resetProductPage('software');
     renderSwProducts();
 }
 
 function setHwFilter(val) {
     document.getElementById('hw-filter-status').value = val;
     document.querySelectorAll('#hw-filter-tabs .filter-tab').forEach(b => b.classList.toggle('active', b.dataset.val === val));
+    resetProductPage('hardware');
     renderHwProducts();
 }
 
@@ -309,8 +373,9 @@ function renderSwProducts() {
     });
     list = applySorting(list, 'software');
     renderStatsBar('sw-stats-bar', all);
+    const page = paginateProductList(list, 'software');
 
-    document.getElementById('sw-products-tbody').innerHTML = list.length ? list.map(p => `
+    document.getElementById('sw-products-tbody').innerHTML = list.length ? page.items.map(p => `
         <tr class="cursor-pointer" onclick="if(!event.target.closest('button'))showSwDetail('${p.id}')">
             <td>
                 <div class="flex items-center gap-3">
@@ -333,9 +398,10 @@ function renderSwProducts() {
         </tr>
     `).join('') : `<tr><td colspan="5" class="text-center py-16">${emptyState(
         'ph-app-window',
-        searchQ || filterS ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA,
+        searchQ ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA,
         !searchQ && !filterS ? '<button onclick="showCreateProductModal(\'software\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Software</button>' : ''
     )}</td></tr>`;
+    renderProductPagination('software', list.length, page.currentPage, page.totalPages);
 }
 
 function productActionBtns(p) {
@@ -447,6 +513,11 @@ function doUnpublish(pid, force = false) {
     closeModal();
     showToast(`${p.name} has been unpublished`, 'info');
     reRenderCurrentList();
+    const detailView = document.getElementById(`view-${p.product_type === 'software' ? 'sw' : 'hw'}-detail`);
+    if (detailView && !detailView.classList.contains('hidden')) {
+        if (p.product_type === 'software') showSwDetail(pid);
+        else showHwDetail(pid);
+    }
 }
 
 // ── Archive ──
@@ -533,8 +604,9 @@ function renderHwProducts() {
     });
     list = applySorting(list, 'hardware');
     renderStatsBar('hw-stats-bar', all);
+    const page = paginateProductList(list, 'hardware');
 
-    document.getElementById('hw-products-tbody').innerHTML = list.length ? list.map(p => `
+    document.getElementById('hw-products-tbody').innerHTML = list.length ? page.items.map(p => `
         <tr class="cursor-pointer" onclick="if(!event.target.closest('button'))showHwDetail('${p.id}')">
             <td>
                 <div style="font-weight:600;font-size:13.5px;color:#1d1d1f">${esc(p.name)}</div>
@@ -554,9 +626,10 @@ function renderHwProducts() {
         </tr>
     `).join('') : `<tr><td colspan="7" class="text-center py-16">${emptyState(
         'ph-hard-drives',
-        searchQ || filterS ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA,
+        searchQ ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA,
         !searchQ && !filterS ? '<button onclick="showCreateProductModal(\'hardware\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Hardware</button>' : ''
     )}</td></tr>`;
+    renderProductPagination('hardware', list.length, page.currentPage, page.totalPages);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -645,7 +718,7 @@ function showHwPreview(pid) {
                         <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
                         <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
                     </div>` : ''}
-                    <button type="button" class="hw-preview-cta">${fmt === 'standard' ? 'Select Hardware' : 'Next: View Spec'}</button>
+                    <button type="button" class="hw-preview-cta">Select Hardware</button>
                 </div>
             </div>
         </div>`;
@@ -1406,7 +1479,7 @@ function renderHardwareCreatePreview() {
                         <img src="images/logo-aidaptiv-plus.png" alt="aiDAPTIV" class="hw-aidaptiv-logo" onerror="this.outerHTML='<span style=&quot;font-size:1rem;font-weight:900;color:#1d1d1f&quot;>aiDAPTIV</span>'">
                         <span class="hw-aidaptiv-link">What is aiDaptiv?</span>
                     </div>` : ''}
-                    <button type="button" class="hw-preview-cta">Next: View Spec</button>
+                    <button type="button" class="hw-preview-cta">Select Hardware</button>
                 </div>
             </div>
             <div style="margin-top:10px;text-align:center;font-size:0.62rem;color:#86868b;font-style:italic">Non-standard storefront card preview</div>`;
@@ -1448,7 +1521,7 @@ function renderHardwareCreatePreview() {
 
 let previewGalleryIndex = 0;
 
-function renderPreviewGallery(images) {
+function renderPreviewGallery(images, context = 'create') {
     if (!images || images.length === 0) {
         return `<div class="sd-gallery"><div class="sd-gallery-placeholder"><i class="ph ph-image" style="font-size:2.2rem;opacity:0.45"></i></div>
             <span class="sd-gallery-nav prev"><i class="ph ph-caret-left"></i></span>
@@ -1462,16 +1535,17 @@ function renderPreviewGallery(images) {
     return `<div>
         <div class="sd-gallery">
             <img class="sd-gallery-img" src="${esc(img.url)}" alt="${esc(img.name)}">
-            ${images.length > 1 ? `<span class="sd-gallery-nav prev" onclick="slidePreviewGallery(-1)"><i class="ph ph-caret-left"></i></span>
-            <span class="sd-gallery-nav next" onclick="slidePreviewGallery(1)"><i class="ph ph-caret-right"></i></span>` : ''}
+            ${images.length > 1 ? `<span class="sd-gallery-nav prev" onclick="slidePreviewGallery(-1,'${context}')"><i class="ph ph-caret-left"></i></span>
+            <span class="sd-gallery-nav next" onclick="slidePreviewGallery(1,'${context}')"><i class="ph ph-caret-right"></i></span>` : ''}
         </div>${dots}</div>`;
 }
 
-function slidePreviewGallery(dir) {
-    const total = createProductState.softwareImages.length;
+function slidePreviewGallery(dir, context = 'create') {
+    const total = context === 'edit' ? editSwImages.length : createProductState.softwareImages.length;
     if (total <= 1) return;
     previewGalleryIndex = (previewGalleryIndex + dir + total) % total;
-    renderSoftwareCreatePreview();
+    if (context === 'edit') renderEditPreview('software');
+    else renderSoftwareCreatePreview();
 }
 
 function renderSoftwareCreatePreview() {
@@ -1572,16 +1646,16 @@ function validateRequiredField(id, message = 'This field is required.') {
 
 function validateCreateProductForm(type) {
     let ok = true;
-    ok = validateRequiredField('new-p-name') && ok;
+    ok = validateRequiredField('new-p-name', 'Please enter Product Name.') && ok;
     if (!(type === 'hardware' && getHwFormat() === 'nonstandard')) {
-        ok = validateRequiredField('new-p-vendor') && ok;
+        ok = validateRequiredField('new-p-vendor', 'Please enter Vendor.') && ok;
     }
     if (type === 'hardware') {
         const fmt = getHwFormat();
         ok = validateRequiredField('new-p-product-type', 'Please select Product Type.') && ok;
         if (fmt === 'standard') {
-            ok = validateRequiredField('new-p-brand') && ok;
-            ok = validateRequiredField('new-p-model') && ok;
+            ok = validateRequiredField('new-p-brand', 'Please enter Brand.') && ok;
+            ok = validateRequiredField('new-p-model', 'Please enter Model.') && ok;
             const specs = collectHardwareSpecs();
             if (specs.length < HW_KEY_SPEC_MIN_ITEMS) {
                 setCreateError('new-p-specs', `At least ${HW_KEY_SPEC_MIN_ITEMS} Key Specifications are required.`);
@@ -1892,8 +1966,17 @@ function showEditProductModal(pid, source) {
     if (p.status === 'archived') { showToast('Archived products cannot be edited. Please restore the product as a draft before making changes.', 'error'); return; }
     // Remember where Edit was opened from so saveProduct can return there.
     editReturnView = source === 'list' ? 'list' : 'detail';
-    editSwImages = []; editSwIcon = null; editHwImage = null; editHwFormat = p.product_format || 'standard';
     const isSW = p.product_type === 'software';
+    const storedSwImages = (p.photos_data?.length ? p.photos_data : (p.image_data ? [p.image_data] : []));
+    editSwImages = storedSwImages.map((url, i) => ({
+        name: p.photos?.[i] || p.image_name || `Product image ${i + 1}`,
+        url,
+        dataUrl: url,
+        isExisting: true,
+    }));
+    editSwIcon = p.icon_data ? { name: p.icon_name || 'Product icon', url: p.icon_data, dataUrl: p.icon_data, isExisting: true } : null;
+    editHwImage = p.image_data ? { name: p.image_name || p.photos?.[0] || 'Product image', url: p.image_data, dataUrl: p.image_data, isExisting: true } : null;
+    editHwFormat = p.product_format || 'standard';
     const publishedHW = PRODUCTS.filter(x => x.product_type === 'hardware' && x.status === 'published');
     // Currently-referenced hardware that is no longer published: shown checked but disabled (pruned on publish, not silently here)
     const unpublishedRefHW = (p.compatible_hardware || [])
@@ -2117,8 +2200,13 @@ function showEditProductModal(pid, source) {
         if ((p.product_format || 'standard') === 'standard') updateEditSpecCounter();
         else updateEditNsCounter();
     }
-    // Render existing images status
-    if (isSW) renderEditSwImageStatus(p);
+    // Render existing image status before binding the live preview.
+    if (isSW) {
+        renderEditSwImageStatus();
+        renderEditSwIconStatus();
+    } else {
+        renderEditHwImageStatus();
+    }
 
     // Setup live preview bindings
     if (isSW) {
@@ -2190,7 +2278,7 @@ function renderEditSwPreview(target) {
             </div>
             <div class="sd-content">
                 <section class="sd-meta-block"><div class="sd-meta-title">${SVG_F} Key Features</div>${featHtml}</section>
-                ${renderPreviewGallery(images)}
+                ${renderPreviewGallery(images, 'edit')}
                 <section class="sd-meta-block"><div class="sd-meta-title">${SVG_I} Applicable Industries</div>${indHtml}</section>
             </div>
             <div class="sd-action-footer" style="margin-top:auto">
@@ -2233,7 +2321,7 @@ function renderEditHwPreview(target) {
                     </div>` : ''}
                     ${!platforms.length && !nsSpecs.length ? '<div style="padding:10px 14px;color:#6d7695;font-size:0.82rem;font-style:italic">Add platform or spec items...</div>' : ''}
                     ${isAidaptiv ? '<div class="hw-aidaptiv-row"><span style="font-size:1rem;font-weight:900;color:#1d1d1f">aiDAPTIV</span><span class="hw-aidaptiv-link">What is aiDaptiv?</span></div>' : ''}
-                    <button type="button" class="hw-preview-cta">Next: View Spec</button>
+                    <button type="button" class="hw-preview-cta">Select Hardware</button>
                 </div>
             </div>
             <div style="margin-top:10px;text-align:center;font-size:0.62rem;color:#86868b;font-style:italic">Non-standard storefront card preview</div>`;
@@ -2268,30 +2356,61 @@ let editHwFormat = 'standard';
 // Where to return after saving an edit: 'list' (opened from the list) or 'detail' (opened from the detail page).
 let editReturnView = 'detail';
 
-function renderEditSwImageStatus(p) {
+function renderEditSwImageStatus() {
     const container = document.getElementById('edit-p-images-status');
     if (!container) return;
-    const photos = editSwImages.length ? editSwImages : (p?.photos || []).map(n => ({ name: n, isExisting: true }));
+    const photos = editSwImages;
     if (!photos.length) { container.innerHTML = ''; return; }
     container.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <span style="font-size:11px;color:#86868b;font-weight:600">${photos.length}/5 images</span>
-            <button type="button" onclick="editSwImages=[];renderEditSwImageStatus()" style="font-size:11px;color:#d97706;font-weight:600;background:none;border:none;cursor:pointer">Clear all</button>
+            <button type="button" onclick="clearEditSwImages()" style="font-size:11px;color:#d97706;font-weight:600;background:none;border:none;cursor:pointer">Clear all</button>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">${photos.map((img, i) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><i class="ph ph-image" style="color:#86868b"></i> ${esc(img.name)} <button type="button" onclick="editSwImages.splice(${i},1);renderEditSwImageStatus()" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`).join('')}</div>`;
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${photos.map((img, i) => `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><img src="${esc(img.url)}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:cover"> ${esc(img.name)} <button type="button" onclick="removeEditSwImage(${i})" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`).join('')}</div>`;
+}
+
+function removeEditSwImage(index) {
+    editSwImages.splice(index, 1);
+    renderEditSwImageStatus();
+    renderEditPreview('software');
+}
+
+function clearEditSwImages() {
+    editSwImages = [];
+    renderEditSwImageStatus();
+    renderEditPreview('software');
+}
+
+function renderEditSwIconStatus() {
+    const statusEl = document.getElementById('edit-p-icon-status');
+    if (!statusEl) return;
+    statusEl.innerHTML = editSwIcon ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><img src="${esc(editSwIcon.url)}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:cover"> ${esc(editSwIcon.name)} <button type="button" onclick="editSwIcon=null;renderEditSwIconStatus();renderEditPreview('software')" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>` : '';
+}
+
+function renderEditHwImageStatus() {
+    const statusEl = document.getElementById('edit-p-hw-image-status');
+    if (!statusEl) return;
+    statusEl.innerHTML = editHwImage ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><img src="${esc(editHwImage.url)}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:cover"> ${esc(editHwImage.name)} <button type="button" onclick="editHwImage=null;renderEditHwImageStatus();renderEditPreview('hardware')" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>` : '';
 }
 
 function handleEditSwImageUpload(input) {
     const errEl = document.getElementById('edit-p-images-error');
     if (errEl) errEl.textContent = '';
     const files = Array.from(input.files || []);
-    const valid = files.filter(f => f.size <= 5 * 1024 * 1024 && /\.(jpe?g|png)$/i.test(f.name));
-    if (valid.length !== files.length && errEl) errEl.textContent = 'Some files were skipped (wrong type or >5MB).';
+    if (files.some(file => !isValidProductImageFile(file))) {
+        if (errEl) errEl.textContent = PRODUCT_IMAGE_ERROR;
+        input.value = '';
+        return;
+    }
     const remaining = 5 - editSwImages.length;
-    if (valid.length > remaining && errEl) errEl.textContent = `Maximum 5 images. Only ${remaining} added.`;
-    editSwImages.push(...valid.slice(0, remaining).map(f => {
+    if (files.length > remaining) {
+        if (errEl) errEl.textContent = 'Maximum 5 images.';
+        input.value = '';
+        return;
+    }
+    editSwImages.push(...files.map(f => {
         const obj = { file: f, name: f.name, url: URL.createObjectURL(f) };
-        Store.compressImage(f).then(d => { obj.dataUrl = d; }).catch(() => {});
+        obj.dataPromise = Store.compressImage(f).then(d => { obj.dataUrl = d; }).catch(() => {});
         return obj;
     }));
     input.value = '';
@@ -2304,16 +2423,15 @@ function handleEditSwIconUpload(input) {
     if (errEl) errEl.textContent = '';
     const file = input.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024 || !/\.(jpe?g|png)$/i.test(file.name)) {
-        if (errEl) errEl.textContent = 'Invalid file. Use JPG/PNG under 5MB.';
+    if (!isValidProductImageFile(file)) {
+        if (errEl) errEl.textContent = PRODUCT_IMAGE_ERROR;
         input.value = ''; return;
     }
     editSwIcon = { file, name: file.name, url: URL.createObjectURL(file) };
     const editIconObj = editSwIcon;
-    Store.compressImage(file).then(d => { editIconObj.dataUrl = d; }).catch(() => {});
+    editIconObj.dataPromise = Store.compressImage(file).then(d => { editIconObj.dataUrl = d; }).catch(() => {});
     renderEditPreview('software');
-    const statusEl = document.getElementById('edit-p-icon-status');
-    if (statusEl) statusEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><i class="ph ph-image" style="color:#86868b"></i> ${esc(file.name)} <button type="button" onclick="editSwIcon=null;this.closest('span').remove()" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`;
+    renderEditSwIconStatus();
 }
 
 function handleEditHwImageUpload(input) {
@@ -2321,19 +2439,18 @@ function handleEditHwImageUpload(input) {
     if (errEl) errEl.textContent = '';
     const file = input.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024 || !/\.(jpe?g|png)$/i.test(file.name)) {
-        if (errEl) errEl.textContent = 'Invalid file. Use JPG/PNG under 5MB.';
+    if (!isValidProductImageFile(file)) {
+        if (errEl) errEl.textContent = PRODUCT_IMAGE_ERROR;
         input.value = ''; return;
     }
     editHwImage = { file, name: file.name, url: URL.createObjectURL(file) };
     const editHwImgObj = editHwImage;
-    Store.compressImage(file).then(d => { editHwImgObj.dataUrl = d; }).catch(() => {});
+    editHwImgObj.dataPromise = Store.compressImage(file).then(d => { editHwImgObj.dataUrl = d; }).catch(() => {});
     renderEditPreview('hardware');
-    const statusEl = document.getElementById('edit-p-hw-image-status');
-    if (statusEl) statusEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><i class="ph ph-image" style="color:#86868b"></i> ${esc(file.name)} <button type="button" onclick="editHwImage=null;this.closest('span').remove()" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`;
+    renderEditHwImageStatus();
 }
 
-function saveProduct(pid) {
+async function saveProduct(pid) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
     const isSW = p.product_type === 'software';
@@ -2342,12 +2459,12 @@ function saveProduct(pid) {
     const isNsHw = !isSW && (p.product_format || 'standard') === 'nonstandard';
 
     // Basic validation
-    if (!val('edit-p-name')) { showToast('Product Name is required', 'error'); setCreateError('edit-p-name', 'Required'); return; }
-    if (!isNsHw && !val('edit-p-vendor')) { showToast('Vendor is required', 'error'); setCreateError('edit-p-vendor', 'Required'); return; }
-    if (isSW && !getCheckedValues('edit-p-categories').length) { showToast('At least 1 category is required', 'error'); setCreateError('edit-p-categories', 'Please select Category.'); return; }
+    if (!val('edit-p-name')) { showToast('Please fix the highlighted fields', 'error'); setCreateError('edit-p-name', 'Please enter Product Name.'); return; }
+    if (!isNsHw && !val('edit-p-vendor')) { showToast('Please fix the highlighted fields', 'error'); setCreateError('edit-p-vendor', 'Please enter Vendor.'); return; }
+    if (isSW && !getCheckedValues('edit-p-categories').length) { showToast('Please fix the highlighted fields', 'error'); setCreateError('edit-p-categories', 'Please select Category.'); return; }
     if (!isSW && (p.product_format || 'standard') === 'standard') {
-        if (!val('edit-p-brand')) { showToast('Brand is required', 'error'); setCreateError('edit-p-brand', 'Required'); return; }
-        if (!val('edit-p-model')) { showToast('Model is required', 'error'); setCreateError('edit-p-model', 'Required'); return; }
+        if (!val('edit-p-brand')) { showToast('Please fix the highlighted fields', 'error'); setCreateError('edit-p-brand', 'Please enter Brand.'); return; }
+        if (!val('edit-p-model')) { showToast('Please fix the highlighted fields', 'error'); setCreateError('edit-p-model', 'Please enter Model.'); return; }
         const editSpecs = collectNsItems('edit-p-spec');
         if (editSpecs.length < HW_KEY_SPEC_MIN_ITEMS) { showToast(`At least ${HW_KEY_SPEC_MIN_ITEMS} specifications required`, 'error'); return; }
     }
@@ -2356,6 +2473,12 @@ function saveProduct(pid) {
             showToast(`At least ${HW_KEY_SPEC_MIN_ITEMS} items across Processor/Platform and Key Specifications`, 'error'); return;
         }
     }
+
+    await Promise.all([
+        ...editSwImages.map(img => img.dataPromise),
+        editSwIcon?.dataPromise,
+        editHwImage?.dataPromise,
+    ].filter(Boolean));
 
     p.name = val('edit-p-name') || p.name;
     if (!isNsHw) p.vendor_name = val('edit-p-vendor') || p.vendor_name;
@@ -2368,8 +2491,13 @@ function saveProduct(pid) {
         p.features = Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => val(`edit-p-feat-${i}`)).filter(Boolean);
         p.industries = Array.from(document.querySelectorAll('#edit-p-industries input:checked')).map(cb => cb.value);
         p.compatible_hardware = Array.from(document.querySelectorAll('#edit-p-compat-hw input:checked')).map(cb => cb.value);
-        if (editSwImages.length) { p.photos = editSwImages.map(img => img.name); p.image_name = editSwImages[0]?.name || ''; p.photos_data = editSwImages.map(img => img.dataUrl).filter(Boolean); p.image_data = editSwImages[0]?.dataUrl || ''; }
-        if (editSwIcon) { p.icon_name = editSwIcon.name; p.icon_data = editSwIcon.dataUrl || ''; }
+        const photoData = editSwImages.map(img => img.dataUrl || img.url || '').filter(Boolean);
+        p.photos = editSwImages.map(img => img.name);
+        p.image_name = editSwImages[0]?.name || '';
+        p.photos_data = photoData;
+        p.image_data = photoData[0] || '';
+        p.icon_name = editSwIcon?.name || '';
+        p.icon_data = editSwIcon?.dataUrl || editSwIcon?.url || '';
     } else {
         const hwFmt = p.product_format || 'standard';
         p.sub_category = val('edit-p-hw-type') || p.sub_category;
@@ -2382,7 +2510,11 @@ function saveProduct(pid) {
             p.ns_platforms = collectNsItems('edit-p-platform');
             p.key_specifications = collectNsItems('edit-p-nsspec');
         }
-        if (editHwImage) { p.image_name = editHwImage.name; p.photos = [editHwImage.name]; p.image_data = editHwImage.dataUrl || ''; p.photos_data = editHwImage.dataUrl ? [editHwImage.dataUrl] : []; }
+        const hwImageData = editHwImage?.dataUrl || editHwImage?.url || '';
+        p.image_name = editHwImage?.name || '';
+        p.photos = editHwImage ? [editHwImage.name] : [];
+        p.image_data = hwImageData;
+        p.photos_data = hwImageData ? [hwImageData] : [];
     }
 
     // Reset edit image state
@@ -2563,7 +2695,7 @@ function addParamTag(prefix) {
     input.value = '';
     Store.save();
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
-    showToast(`"${value}" has been added successfully.`);
+    showToast(`${value} has been added successfully.`);
 }
 
 // Products currently using a given parameter value (so delete can warn / clean up).
@@ -2629,7 +2761,7 @@ function doDeleteParamTag(prefix, idx, force = false) {
     Store.save();
     closeModal();
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
-    showToast(`"${label}" has been deleted successfully.`);
+    showToast(`${label} has been deleted successfully.`);
 }
 
 /* ── Display Order ── */
@@ -2747,11 +2879,7 @@ function confirmResetDemoData() {
 const HISTORY_PAGE_SIZE = 5;
 
 function renderProductHistory(p) {
-    if (!p.history || !p.history.length) return `
-        <div style="border-top:1px solid var(--border-light);margin-top:32px;padding-top:32px">
-            <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">History</div>
-            <div style="font-size:13px;color:#c7c7cc;font-style:italic">No history recorded yet.</div>
-        </div>`;
+    if (!p.history || !p.history.length) return '';
     const actionColors = {
         'Created': '#2563eb', 'Updated': '#1d1d1f', 'Published': '#059669',
         'Unpublished': '#d97706', 'Archived': '#7c3aed', 'Restored': '#059669', 'Deleted': '#dc2626',
@@ -2790,13 +2918,11 @@ function renderProductHistory(p) {
 function showMoreProductHistory(btn) {
     const root = btn.closest('.product-history-section');
     if (!root) return;
-    Array.from(root.querySelectorAll('.history-entry-hidden')).slice(0, HISTORY_PAGE_SIZE).forEach(el => {
+    root.querySelectorAll('.history-entry-hidden').forEach(el => {
         el.classList.remove('history-entry-hidden');
         el.style.display = 'flex';
     });
-    const remaining = root.querySelectorAll('.history-entry-hidden').length;
-    if (remaining) btn.innerHTML = `<i class="ph ph-caret-down"></i> More (${remaining})`;
-    else btn.parentElement.remove();
+    btn.parentElement.remove();
 }
 
 // ═══════════════════════════════════════════════════════════════════

@@ -194,6 +194,89 @@ let PRODUCTS = [
     },
 ];
 
+// Additional mock catalog entries keep both product lists above one page so
+// pagination, filtering, sorting, archived states, and history expansion can
+// be exercised without manually creating products.
+const MOCK_DATA_VERSION = 1;
+const MOCK_HARDWARE_PRODUCTS = [
+    { name: 'EdgeCore AI MiniPC', model: 'EC-MP100', brand: 'EdgeCore', category: 'miniPC', status: 'published', aidaptiv: true, format: 'standard' },
+    { name: 'VisionBox Edge AI', model: 'VB-AI200', brand: 'Aetina', category: 'AI Box', status: 'draft', aidaptiv: false, format: 'standard' },
+    { name: 'NeuralRack 2U Inference Server', model: 'NR-2U400', brand: 'Supermicro', category: 'Rack Server', status: 'published', aidaptiv: true, format: 'standard' },
+    { name: 'Liquid-Cooled Training Node', model: 'LC-TN800', brand: 'Inventec', category: 'Rack Server', status: 'archived', aidaptiv: true, format: 'nonstandard' },
+    { name: 'AI Developer Notebook', model: 'ADN-16X', brand: 'GIGABYTE', category: 'AITNB', status: 'published', aidaptiv: false, format: 'standard' },
+    { name: 'Compact AI Workstation', model: 'CAW-550', brand: 'ASUS', category: 'Workstation', status: 'draft', aidaptiv: true, format: 'standard' },
+    { name: 'DataForge Storage Server', model: 'DF-4U120', brand: 'Gigacomputing', category: 'Rack Server', status: 'published', aidaptiv: true, format: 'standard' },
+    { name: 'Edge Gateway Pro', model: 'EGP-300', brand: 'Advantech', category: 'AI Box', status: 'draft', aidaptiv: false, format: 'nonstandard' },
+    { name: 'GPU Expansion Chassis', model: 'GEC-8X', brand: 'AIC', category: 'Rack Server', status: 'published', aidaptiv: false, format: 'nonstandard' },
+].map((item, index) => ({
+    id: `hw${index + 4}`,
+    is_mock: true,
+    product_type: 'hardware',
+    product_format: item.format,
+    vendor_id: 'v-phison',
+    vendor_name: 'Phison Electronics',
+    name: item.name,
+    model: item.model,
+    brand: item.brand,
+    sub_category: item.category,
+    display_order: index + 4,
+    short_description: `Mock ${item.category} product for catalog workflow testing.`,
+    status: item.status,
+    created_at: `2026-04-${String(index + 1).padStart(2, '0')}`,
+    updated_at: `2026-06-${String(index + 10).padStart(2, '0')}`,
+    is_aidaptiv: item.aidaptiv,
+    ns_platforms: item.format === 'nonstandard' ? ['NVIDIA accelerated computing platform'] : [],
+    key_specifications: item.format === 'nonstandard'
+        ? ['Configurable GPU topology', 'Enterprise NVMe storage']
+        : ['Intel Xeon or Core Ultra processor', 'NVIDIA RTX professional GPU', 'DDR5 ECC memory', 'High-speed NVMe storage'],
+    bestFor: ['AI Inference', 'Model Development', 'Enterprise Deployment'],
+    history: index === 0 ? Array.from({ length: 7 }, (_, historyIndex) => ({
+        action: historyIndex === 0 ? 'Published' : 'Updated',
+        detail: historyIndex === 0 ? 'Listed on storefront' : `Mock revision ${7 - historyIndex}`,
+        timestamp: `2026-06-${String(20 - historyIndex).padStart(2, '0')}T09:00:00.000Z`,
+        user: 'System Root',
+    })) : [],
+}));
+
+const MOCK_SOFTWARE_PRODUCTS = [
+    { name: 'FraudShield AI', vendor: 'TPIsoftware Corporation', vendorId: 'v-tpi', category: 'Fraud Prevention', status: 'published', packaging: 'included' },
+    { name: 'HealthAssist Copilot', vendor: 'TPIsoftware Corporation', vendorId: 'v-tpi', category: 'Healthcare', status: 'draft', packaging: 'optional' },
+    { name: 'RetailPulse Analytics', vendor: 'KDAN', vendorId: 'v-kdan', category: 'Marketing', status: 'published', packaging: 'optional' },
+    { name: 'Factory Operations Copilot', vendor: 'TPIsoftware Corporation', vendorId: 'v-tpi', category: 'Business Applications', status: 'archived', packaging: 'optional' },
+    { name: 'GovKnowledge Hub', vendor: 'TPIsoftware Corporation', vendorId: 'v-tpi', category: 'National Defense', status: 'published', packaging: 'included' },
+    { name: 'SecureVision Monitor', vendor: 'KDAN', vendorId: 'v-kdan', category: 'Cybersecurity', status: 'draft', packaging: 'optional' },
+].map((item, index) => ({
+    id: `sw${index + 7}`,
+    is_mock: true,
+    product_type: 'software',
+    vendor_id: item.vendorId,
+    vendor_name: item.vendor,
+    name: item.name,
+    brand: item.vendor.split(' ')[0],
+    sub_category: item.category,
+    categories: [item.category],
+    display_order: index + 7,
+    short_description: `Mock ${item.category} solution for product catalog testing.`,
+    status: item.status,
+    created_at: `2026-04-${String(index + 10).padStart(2, '0')}`,
+    updated_at: `2026-06-${String(index + 18).padStart(2, '0')}`,
+    tagline: `${item.name} for secure and efficient enterprise operations.`,
+    sw_category: item.packaging,
+    compatible_hardware: item.status === 'published' ? ['hw1', 'hw2'] : [],
+    features: [
+        'Configurable enterprise workflow',
+        'Role-based access and audit trail',
+        'Real-time operational dashboard',
+        'API-ready system integration',
+    ],
+    industries: ['Banking & Finance', 'Information Technology', 'Manufacturing'],
+    officialUrl: 'https://www.tpisoftware.com',
+    videoUrl: '',
+    history: [],
+}));
+
+PRODUCTS.push(...MOCK_HARDWARE_PRODUCTS, ...MOCK_SOFTWARE_PRODUCTS);
+
 // Initialize history for all products
 PRODUCTS.forEach(p => { if (!p.history) p.history = []; });
 
@@ -268,4 +351,3 @@ let createProductState = { type: null, hardwareImage: null, softwareIcon: null, 
 
 let sortState = { software: { key: null, dir: 'asc' }, hardware: { key: null, dir: 'asc' } };
 let ACTIVITY_LOG = [];
-

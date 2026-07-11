@@ -14,6 +14,7 @@ const Store = (function () {
     function serialize() {
         return JSON.stringify({
             version: VERSION,
+            mockDataVersion: typeof MOCK_DATA_VERSION === 'undefined' ? 0 : MOCK_DATA_VERSION,
             savedAt: new Date().toISOString(),
             PRODUCTS,
             ACTIVITY_LOG,
@@ -50,11 +51,24 @@ const Store = (function () {
             return false;
         }
 
-        if (Array.isArray(data.PRODUCTS)) PRODUCTS = data.PRODUCTS;
+        let mockDataMigrated = false;
+        if (Array.isArray(data.PRODUCTS)) {
+            const seedMockProducts = PRODUCTS.filter(product => product.is_mock);
+            if (data.mockDataVersion !== MOCK_DATA_VERSION) {
+                const persistedIds = new Set(data.PRODUCTS.map(product => product.id));
+                PRODUCTS = [...data.PRODUCTS, ...seedMockProducts.filter(product => !persistedIds.has(product.id))];
+                mockDataMigrated = true;
+            } else {
+                PRODUCTS = data.PRODUCTS;
+            }
+        }
         if (Array.isArray(data.ACTIVITY_LOG)) ACTIVITY_LOG = data.ACTIVITY_LOG;
         if (Array.isArray(data.HARDWARE_PRODUCT_TYPES)) HARDWARE_PRODUCT_TYPES = data.HARDWARE_PRODUCT_TYPES;
         if (Array.isArray(data.SOFTWARE_CATEGORY_OPTIONS)) SOFTWARE_CATEGORY_OPTIONS = data.SOFTWARE_CATEGORY_OPTIONS;
         if (Array.isArray(data.SOFTWARE_INDUSTRY_OPTIONS)) SOFTWARE_INDUSTRY_OPTIONS = data.SOFTWARE_INDUSTRY_OPTIONS;
+        if (mockDataMigrated) {
+            try { localStorage.setItem(KEY, serialize()); } catch (e) { /* retry on the next normal save */ }
+        }
         return true;
     }
 
