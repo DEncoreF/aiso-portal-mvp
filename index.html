@@ -733,6 +733,18 @@
                             <input id="settings-role" type="text" class="w-full border border-[#e8eaed] rounded-lg px-4 py-2.5 text-sm bg-[#fafbfc]" readonly>
                         </div>
                     </div>
+                    <div class="card p-8 mt-6">
+                        <h3 class="text-sm font-bold mb-2">Error State Demo</h3>
+                        <p class="text-sm mb-4" style="color:#86868b">Preview the standard HTTP error screens shown when data cannot be loaded.</p>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="showErrorStateDemo(400)" class="btn-secondary">400</button>
+                            <button onclick="showErrorStateDemo(401)" class="btn-secondary">401</button>
+                            <button onclick="showErrorStateDemo(403)" class="btn-secondary">403</button>
+                            <button onclick="showErrorStateDemo(404)" class="btn-secondary">404</button>
+                            <button onclick="showErrorStateDemo(500)" class="btn-secondary">500</button>
+                            <button onclick="showErrorStateDemo(503)" class="btn-secondary">503</button>
+                        </div>
+                    </div>
                     <div class="card p-8 mt-6" style="border-color:#fecaca">
                         <h3 class="text-sm font-bold mb-2" style="color:#dc2626">Danger Zone</h3>
                         <p class="text-sm mb-4" style="color:#86868b">Clears all locally saved changes and restores the original demo data.</p>

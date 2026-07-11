@@ -29,7 +29,7 @@ const Store = (function () {
         } catch (e) {
             console.error('Store.save failed:', e);
             if (typeof showToast === 'function') {
-                showToast('Save failed — storage quota exceeded. Try removing product images.', 'error');
+                showToast('Update failed. Please contact the administrator.', 'error');
             }
         }
     }

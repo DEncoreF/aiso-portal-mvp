@@ -38,8 +38,9 @@ function statusBadge(s) {
 
 function showToast(msg, type = 'success') {
     const el = document.createElement('div');
-    // Toasts use only two colors: red for problems/blocks/destructive actions,
-    // green for everything else (successes and neutral confirmations).
+    // Toasts use only two colors: red for errors and blocking messages,
+    // green for every success confirmation (including the completion of
+    // destructive actions such as a permanent delete).
     const isRed = type === 'error' || type === 'warning' || type === 'danger';
     el.className = `toast-animate text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-lg ${isRed ? 'bg-red-600' : 'bg-emerald-600'}`;
     el.textContent = msg;
@@ -54,6 +55,36 @@ function showModal(html, wide = false) {
 }
 
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+
+// ── Shared empty state ──
+// Centered icon + gray message (+ optional CTA/extra HTML). Every list routes
+// its empty state through here so they look and read the same across the app.
+function emptyState(icon, message, extra = '') {
+    return `<div class="flex flex-col items-center gap-3">
+        <i class="ph ${esc(icon)} text-4xl text-[#c7c7cc]"></i>
+        <div class="text-sm text-[#86868b] font-semibold">${esc(message)}</div>
+        ${extra}
+    </div>`;
+}
+
+// ── Shared HTTP error screen ──
+// Same visual language as the empty state: centered icon + status code + copy,
+// plus an optional action button. Intended for future API wiring; previewable
+// today from Settings → Error State Demo.
+function renderErrorState(code, actionHtml = '') {
+    const message = (typeof HTTP_ERROR_MESSAGES !== 'undefined' && HTTP_ERROR_MESSAGES[code])
+        || 'Something went wrong. Please try again later.';
+    return `<div class="flex flex-col items-center gap-3 text-center" style="padding:1rem 0">
+        <i class="ph ph-warning-octagon text-[#c7c7cc]" style="font-size:3rem"></i>
+        <div class="text-2xl font-bold text-[#1d1d1f]">${esc(String(code))}</div>
+        <div class="text-sm text-[#86868b] font-semibold" style="max-width:360px">${esc(message)}</div>
+        ${actionHtml}
+    </div>`;
+}
+
+function showErrorStateDemo(code) {
+    showModal(renderErrorState(code, '<button onclick="closeModal()" class="btn-primary" style="margin-top:8px"><i class="ph ph-arrow-left"></i> Back</button>'));
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // LOGIN / LOGOUT
@@ -300,13 +331,11 @@ function renderSwProducts() {
                 </div>
             </td>
         </tr>
-    `).join('') : `<tr><td colspan="5" class="text-center py-16">
-        <div class="flex flex-col items-center gap-3">
-            <i class="ph ph-app-window text-4xl text-[#c7c7cc]"></i>
-            <div class="text-sm text-[#86868b] font-semibold">${searchQ || filterS ? 'No matching software found' : 'No software products yet'}</div>
-            ${!searchQ && !filterS ? '<button onclick="showCreateProductModal(\'software\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Software</button>' : ''}
-        </div>
-    </td></tr>`;
+    `).join('') : `<tr><td colspan="5" class="text-center py-16">${emptyState(
+        'ph-app-window',
+        searchQ || filterS ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA,
+        !searchQ && !filterS ? '<button onclick="showCreateProductModal(\'software\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Software</button>' : ''
+    )}</td></tr>`;
 }
 
 function productActionBtns(p) {
@@ -442,7 +471,7 @@ function restoreProduct(pid) {
     p.status = 'draft';
     p.updated_at = new Date().toISOString().slice(0, 10);
     logActivity('Restored', p.name, 'Restored to Draft');
-    showToast(`${p.name} restored as draft`, 'success');
+    showToast(`${p.name} has been restored as a draft.`, 'success');
     reRenderCurrentList();
 }
 
@@ -478,7 +507,7 @@ function doDeleteProduct(pid, force = false) {
     PRODUCTS.splice(PRODUCTS.indexOf(p), 1);
     logActivity('Deleted', name, 'Product permanently removed');
     closeModal();
-    showToast(`${name} permanently deleted`, 'error');
+    showToast(`${name} has been permanently deleted.`, 'success');
     reRenderCurrentList();
 }
 
@@ -523,13 +552,11 @@ function renderHwProducts() {
                 </div>
             </td>
         </tr>
-    `).join('') : `<tr><td colspan="7" class="text-center py-16">
-        <div class="flex flex-col items-center gap-3">
-            <i class="ph ph-hard-drives text-4xl text-[#c7c7cc]"></i>
-            <div class="text-sm text-[#86868b] font-semibold">${searchQ || filterS ? 'No matching hardware found' : 'No hardware products yet'}</div>
-            ${!searchQ && !filterS ? '<button onclick="showCreateProductModal(\'hardware\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Hardware</button>' : ''}
-        </div>
-    </td></tr>`;
+    `).join('') : `<tr><td colspan="7" class="text-center py-16">${emptyState(
+        'ph-hard-drives',
+        searchQ || filterS ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA,
+        !searchQ && !filterS ? '<button onclick="showCreateProductModal(\'hardware\')" class="btn-primary text-xs mt-1"><i class="ph ph-plus-circle"></i> Add Hardware</button>' : ''
+    )}</td></tr>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1551,7 +1578,7 @@ function validateCreateProductForm(type) {
     }
     if (type === 'hardware') {
         const fmt = getHwFormat();
-        ok = validateRequiredField('new-p-product-type') && ok;
+        ok = validateRequiredField('new-p-product-type', 'Please select Product Type.') && ok;
         if (fmt === 'standard') {
             ok = validateRequiredField('new-p-brand') && ok;
             ok = validateRequiredField('new-p-model') && ok;
@@ -1574,14 +1601,14 @@ function validateCreateProductForm(type) {
             }
         }
         if (!createProductState.hardwareImage) {
-            setCreateError('new-p-image', PRODUCT_IMAGE_ERROR);
+            setCreateError('new-p-image', 'Please upload Product Image.');
             ok = false;
         }
     } else {
         // Software: at least 1 category required
         const categories = getCheckedValues('new-p-categories');
         if (!categories.length) {
-            setCreateError('new-p-categories', 'Select at least 1 category.');
+            setCreateError('new-p-categories', 'Please select Category.');
             ok = false;
         } else {
             setCreateError('new-p-categories', '');
@@ -1855,14 +1882,14 @@ function createProduct(type) {
     PRODUCTS.push(newP);
     logActivity('Created', name, 'New draft created');
     closeModal();
-    showToast(`${name} created as draft`, 'success');
+    showToast(`${name} has been created as a draft.`, 'success');
     navigate(isSW ? 'sw-products' : 'hw-products');
 }
 
 function showEditProductModal(pid, source) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
-    if (p.status === 'archived') { showToast('Restore this product before editing', 'error'); return; }
+    if (p.status === 'archived') { showToast('Archived products cannot be edited. Please restore the product as a draft before making changes.', 'error'); return; }
     // Remember where Edit was opened from so saveProduct can return there.
     editReturnView = source === 'list' ? 'list' : 'detail';
     editSwImages = []; editSwIcon = null; editHwImage = null; editHwFormat = p.product_format || 'standard';
@@ -2317,7 +2344,7 @@ function saveProduct(pid) {
     // Basic validation
     if (!val('edit-p-name')) { showToast('Product Name is required', 'error'); setCreateError('edit-p-name', 'Required'); return; }
     if (!isNsHw && !val('edit-p-vendor')) { showToast('Vendor is required', 'error'); setCreateError('edit-p-vendor', 'Required'); return; }
-    if (isSW && !getCheckedValues('edit-p-categories').length) { showToast('At least 1 category is required', 'error'); setCreateError('edit-p-categories', 'Select at least 1 category.'); return; }
+    if (isSW && !getCheckedValues('edit-p-categories').length) { showToast('At least 1 category is required', 'error'); setCreateError('edit-p-categories', 'Please select Category.'); return; }
     if (!isSW && (p.product_format || 'standard') === 'standard') {
         if (!val('edit-p-brand')) { showToast('Brand is required', 'error'); setCreateError('edit-p-brand', 'Required'); return; }
         if (!val('edit-p-model')) { showToast('Model is required', 'error'); setCreateError('edit-p-model', 'Required'); return; }
@@ -2441,7 +2468,7 @@ function renderParamPackaging() {
                 </td>
             </tr>`;
         }).join('')
-        : '<tr><td colspan="4" class="text-center text-sm text-[#86868b] py-8">No software products found</td></tr>';
+        : `<tr><td colspan="4" class="py-8">${emptyState('ph-app-window', EMPTY_STATE_NO_DATA)}</td></tr>`;
 }
 
 function updateSwPackaging(pid, value) {
@@ -2477,6 +2504,11 @@ function renderParamTagList(containerId, dataArr, prefix) {
                         onclick="toggleParamTag('${prefix}', ${idx})"
                         title="${item.is_active ? 'Disable' : 'Enable'}">
                         <i class="ph ${item.is_active ? 'ph-check' : 'ph-arrow-counter-clockwise'}" style="font-size:10px"></i>
+                    </button>
+                    <button type="button" class="w-5 h-5 rounded-full flex items-center justify-center text-xs bg-[#f5f5f7] text-[#86868b] hover:bg-red-50 hover:text-red-500 transition"
+                        onclick="confirmDeleteParamTag('${prefix}', ${idx})"
+                        title="Delete">
+                        <i class="ph ph-trash" style="font-size:10px"></i>
                     </button>
                 </div>
             `).join('')}
@@ -2531,7 +2563,73 @@ function addParamTag(prefix) {
     input.value = '';
     Store.save();
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
-    showToast(`"${value}" added`);
+    showToast(`"${value}" has been added successfully.`);
+}
+
+// Products currently using a given parameter value (so delete can warn / clean up).
+function findParamTagUsage(prefix, label) {
+    if (prefix === 'sw-cat') {
+        return PRODUCTS.filter(p => p.product_type === 'software'
+            && ((p.categories || []).includes(label) || p.sub_category === label));
+    }
+    if (prefix === 'sw-ind') {
+        return PRODUCTS.filter(p => p.product_type === 'software' && (p.industries || []).includes(label));
+    }
+    if (prefix === 'hw-type') {
+        return PRODUCTS.filter(p => p.product_type === 'hardware' && p.sub_category === label);
+    }
+    return [];
+}
+
+// Strip a parameter value from every product that references it.
+function removeParamTagFromProducts(prefix, label) {
+    findParamTagUsage(prefix, label).forEach(p => {
+        if (prefix === 'sw-cat') {
+            p.categories = (p.categories || []).filter(c => c !== label);
+            if (p.sub_category === label) p.sub_category = p.categories[0] || '';
+        } else if (prefix === 'sw-ind') {
+            p.industries = (p.industries || []).filter(i => i !== label);
+        } else if (prefix === 'hw-type') {
+            if (p.sub_category === label) p.sub_category = '';
+        }
+        p.updated_at = new Date().toISOString().slice(0, 10);
+    });
+}
+
+function confirmDeleteParamTag(prefix, idx) {
+    const arr = getParamDataArr(prefix);
+    const item = arr[idx];
+    if (!item) return;
+    const used = findParamTagUsage(prefix, item.label);
+    // Not referenced anywhere → delete straight away.
+    if (!used.length) { doDeleteParamTag(prefix, idx); return; }
+    // In use → same orange warning pattern as the hardware compatibility conflict modal.
+    const refNames = used.map(p => esc(p.name)).join('<br>');
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fff7ed;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#d97706"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Delete "${esc(item.label)}"?</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 12px;line-height:1.6">This value is currently used by:</p>
+            <div style="font-size:13px;font-weight:600;color:#1d1d1f;margin:0 0 12px;line-height:1.8">${refNames}</div>
+            <p style="font-size:13px;color:#86868b;margin:0 0 24px;line-height:1.6">Proceeding will remove it from those products.</p>
+            <div style="display:flex;gap:10px;justify-content:center">
+                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button onclick="doDeleteParamTag('${prefix}', ${idx}, true)" class="btn-primary" style="background:#d97706"><i class="ph ph-warning-circle"></i> Delete Anyway</button>
+            </div>
+        </div>`);
+}
+
+function doDeleteParamTag(prefix, idx, force = false) {
+    const arr = getParamDataArr(prefix);
+    const item = arr[idx];
+    if (!item) return;
+    const label = item.label;
+    if (force) removeParamTagFromProducts(prefix, label);
+    arr.splice(idx, 1);
+    Store.save();
+    closeModal();
+    renderParamTagList(getParamContainerId(prefix), arr, prefix);
+    showToast(`"${label}" has been deleted successfully.`);
 }
 
 /* ── Display Order ── */
@@ -2543,7 +2641,7 @@ function renderDisplayOrder(type) {
         .filter(p => p.product_type === type)
         .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
     if (!items.length) {
-        target.innerHTML = '<div class="text-sm text-[#86868b] text-center py-8">No products found</div>';
+        target.innerHTML = `<div class="py-8">${emptyState(type === 'software' ? 'ph-app-window' : 'ph-hard-drives', EMPTY_STATE_NO_DATA)}</div>`;
         return;
     }
     const publishedItems = items.filter(p => p.status === 'published');
@@ -2618,9 +2716,9 @@ function onOrderDrop(e, type, targetPid) {
         .filter(p => p.product_type === type && p.status !== 'published')
         .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
     [...published, ...others].forEach((p, i) => { p.display_order = i + 1; });
-    logActivity('Reordered', moved.name, `moved to position ${toIdx + 1}`, moved.id);
+    logActivity('Reordered', moved.name, `Reordered to position ${toIdx + 1}`, moved.id);
     renderDisplayOrder(type);
-    showToast(`${moved.name} moved to position ${toIdx + 1}`);
+    showToast('Product order updated.');
 }
 
 function renderSettings() {
@@ -2646,6 +2744,8 @@ function confirmResetDemoData() {
 // PRODUCT HISTORY (per-product timeline)
 // ═══════════════════════════════════════════════════════════════════
 
+const HISTORY_PAGE_SIZE = 5;
+
 function renderProductHistory(p) {
     if (!p.history || !p.history.length) return `
         <div style="border-top:1px solid var(--border-light);margin-top:32px;padding-top:32px">
@@ -2661,16 +2761,17 @@ function renderProductHistory(p) {
         'Unpublished': 'ph-arrow-line-down', 'Archived': 'ph-archive', 'Restored': 'ph-arrow-counter-clockwise', 'Deleted': 'ph-trash',
     };
     return `
-        <div style="border-top:1px solid var(--border-light);margin-top:32px;padding-top:32px">
+        <div class="product-history-section" style="border-top:1px solid var(--border-light);margin-top:32px;padding-top:32px">
             <div style="font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">History</div>
             <div style="display:flex;flex-direction:column;gap:0;position:relative;padding-left:20px">
                 <div style="position:absolute;left:7px;top:6px;bottom:6px;width:1px;background:var(--border-light)"></div>
-                ${p.history.slice(0, 15).map(h => {
+                ${p.history.map((h, i) => {
                     const color = actionColors[h.action] || '#86868b';
                     const icon = actionIcons[h.action] || 'ph-info';
                     const d = new Date(h.timestamp);
                     const timeStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                    return `<div style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;position:relative">
+                    const hidden = i >= HISTORY_PAGE_SIZE;
+                    return `<div class="history-entry${hidden ? ' history-entry-hidden' : ''}" style="display:${hidden ? 'none' : 'flex'};align-items:flex-start;gap:12px;padding:8px 0;position:relative">
                         <div style="position:absolute;left:-20px;top:10px;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid ${color};display:flex;align-items:center;justify-content:center;z-index:1"><i class="ph ${icon}" style="font-size:8px;color:${color}"></i></div>
                         <div style="flex:1;min-width:0">
                             <div style="font-size:13px;font-weight:600;color:${color}">${esc(h.action)}${h.detail ? ' <span style="font-weight:400;color:#86868b">· ' + esc(h.detail) + '</span>' : ''}</div>
@@ -2679,7 +2780,23 @@ function renderProductHistory(p) {
                     </div>`;
                 }).join('')}
             </div>
+            ${p.history.length > HISTORY_PAGE_SIZE ? `
+            <div style="margin-top:12px;padding-left:20px">
+                <button type="button" class="btn-ghost" style="font-size:12px" onclick="showMoreProductHistory(this)"><i class="ph ph-caret-down"></i> More (${p.history.length - HISTORY_PAGE_SIZE})</button>
+            </div>` : ''}
         </div>`;
+}
+
+function showMoreProductHistory(btn) {
+    const root = btn.closest('.product-history-section');
+    if (!root) return;
+    Array.from(root.querySelectorAll('.history-entry-hidden')).slice(0, HISTORY_PAGE_SIZE).forEach(el => {
+        el.classList.remove('history-entry-hidden');
+        el.style.display = 'flex';
+    });
+    const remaining = root.querySelectorAll('.history-entry-hidden').length;
+    if (remaining) btn.innerHTML = `<i class="ph ph-caret-down"></i> More (${remaining})`;
+    else btn.parentElement.remove();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2690,11 +2807,11 @@ function renderActivityLog() {
     const target = document.getElementById('activity-log-list');
     if (!target) return;
     if (!ACTIVITY_LOG.length) {
-        target.innerHTML = `<div style="text-align:center;padding:48px 0">
-            <i class="ph ph-clock-counter-clockwise" style="font-size:2.5rem;color:#c7c7cc;display:block;margin-bottom:12px"></i>
-            <div style="font-size:14px;color:#86868b;font-weight:500">No activity yet</div>
-            <div style="font-size:12px;color:#c7c7cc;margin-top:4px">Actions like publish, archive, and delete will appear here.</div>
-        </div>`;
+        target.innerHTML = `<div style="padding:32px 0">${emptyState(
+            'ph-clock-counter-clockwise',
+            EMPTY_STATE_NO_DATA,
+            '<div style="font-size:12px;color:#c7c7cc;margin-top:4px">Actions like publish, archive, and delete will appear here.</div>'
+        )}</div>`;
         return;
     }
     const actionIcons = {

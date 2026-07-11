@@ -249,7 +249,21 @@ const HW_KEY_SPEC_MAX_CHARS = 150;
 const SOFTWARE_FEATURE_MAX_ITEMS = 5;
 const SOFTWARE_FEATURE_MAX_CHARS = 150;
 const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-const PRODUCT_IMAGE_ERROR = 'File exceeds the size limit or has an unsupported format.';
+const PRODUCT_IMAGE_ERROR = 'File exceeds the size limit or the format is invalid.';
+
+// ── Shared empty-state copy (used by every list via emptyState()) ──
+const EMPTY_STATE_NO_DATA = 'No matching data found.';
+const EMPTY_STATE_NO_RESULTS = 'No results found. Please try adjusting your search criteria.';
+
+// ── Standard HTTP error-screen copy (for future API wiring; previewable in Settings) ──
+const HTTP_ERROR_MESSAGES = {
+    400: 'Invalid request.',
+    401: 'Authentication required.',
+    403: "Permission denied. Please contact your organization's administrator.",
+    404: 'The requested data was not found or has been deleted.',
+    500: 'Unable to retrieve data. Please try again later.',
+    503: 'Service temporarily unavailable. Please try again later.',
+};
 let createProductState = { type: null, hardwareImage: null, softwareIcon: null, softwareImages: [] };
 
 let sortState = { software: { key: null, dir: 'asc' }, hardware: { key: null, dir: 'asc' } };
