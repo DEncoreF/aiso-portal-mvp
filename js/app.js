@@ -532,7 +532,7 @@ function archiveProduct(pid, force = false) {
     p.status = 'archived';
     p.updated_at = new Date().toISOString().slice(0, 10);
     logActivity('Archived', p.name, `Archived from ${prevLabel}`);
-    showToast(`${p.name} archived`, 'info');
+    showToast(`${p.name} has been archived.`, 'success');
     reRenderCurrentList();
 }
 
@@ -1321,7 +1321,15 @@ function getHwFormat() {
     return document.querySelector('input[name="hw-format"]:checked')?.value || 'standard';
 }
 
+function clearCreateProductValidation() {
+    const form = document.getElementById('create-product-form');
+    if (!form) return;
+    form.querySelectorAll('.field-error-text').forEach(error => { error.textContent = ''; });
+    form.querySelectorAll('.field-error').forEach(field => field.classList.remove('field-error'));
+}
+
 function switchHwFormat(fmt) {
+    clearCreateProductValidation();
     document.querySelectorAll('#hw-format-selector label').forEach(l => l.classList.remove('is-active'));
     const radio = document.getElementById('hw-format-' + fmt);
     if (radio) { radio.checked = true; radio.nextElementSibling?.classList.add('is-active'); }
@@ -1331,7 +1339,7 @@ function switchHwFormat(fmt) {
     if (fmt === 'nonstandard') {
         if (stdSection) stdSection.style.display = 'none';
         if (nsSection) nsSection.style.display = '';
-        if (vendorBlock) { vendorBlock.style.display = 'none'; setCreateError('new-p-vendor', ''); }
+        if (vendorBlock) vendorBlock.style.display = 'none';
     } else {
         if (stdSection) stdSection.style.display = '';
         if (nsSection) nsSection.style.display = 'none';
