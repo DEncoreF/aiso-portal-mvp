@@ -1216,7 +1216,7 @@ function getProductInitials(name) {
 
 function renderSortableProductImage(img, index, context) {
     const removeHandler = context === 'edit' ? `removeEditSwImage(${index})` : `removeSoftwareImage(${index})`;
-    return `<div class="product-image-sort-item" draggable="true" title="Drag to reorder"
+    return `<div class="product-image-sort-item is-sortable" draggable="true" title="Drag to reorder"
         ondragstart="onProductImageDragStart(event,'${context}',${index})"
         ondragover="onProductImageDragOver(event)"
         ondragleave="onProductImageDragLeave(event)"
@@ -1227,7 +1227,17 @@ function renderSortableProductImage(img, index, context) {
         <span class="product-image-sort-name">${esc(img.name)}</span>
         ${index === 0 ? '<span class="product-image-primary-badge">Main</span>' : ''}
         <button type="button" class="product-image-sort-remove" aria-label="Remove ${esc(img.name)}" onclick="event.stopPropagation();${removeHandler}">
-            <i class="ph ph-x"></i>
+            <i class="ph ph-trash"></i><span>Remove</span>
+        </button>
+    </div>`;
+}
+
+function renderSingleProductImage(img, removeHandler) {
+    return `<div class="product-image-sort-item">
+        <img class="product-image-sort-thumb" src="${esc(img.url)}" alt="" draggable="false">
+        <span class="product-image-sort-name">${esc(img.name)}</span>
+        <button type="button" class="product-image-sort-remove" aria-label="Remove ${esc(img.name)}" onclick="${removeHandler}">
+            <i class="ph ph-trash"></i><span>Remove</span>
         </button>
     </div>`;
 }
@@ -1237,11 +1247,7 @@ function renderImageStatus(type) {
     if (!target) return;
     if (type === 'hardware') {
         const img = createProductState.hardwareImage;
-        target.innerHTML = img ? `
-            <div class="flex items-center justify-between gap-3 rounded-xl border border-[#e8eaed] bg-[#f5f5f7] px-3 py-2.5">
-                <span class="image-chip"><i class="ph ph-image"></i><span class="truncate">${esc(img.name)}</span></span>
-                <button type="button" class="btn-ghost py-1 px-2" onclick="removeHardwareImage()"><i class="ph ph-trash"></i> Delete</button>
-            </div>` : '';
+        target.innerHTML = img ? renderSingleProductImage(img, 'removeHardwareImage()') : '';
         return;
     }
     const imgs = createProductState.softwareImages;
@@ -1326,11 +1332,7 @@ function renderIconStatus() {
     const target = document.getElementById('software-icon-status');
     if (!target) return;
     const icon = createProductState.softwareIcon;
-    target.innerHTML = icon ? `
-        <div class="flex items-center justify-between gap-3 rounded-xl border border-[#e8eaed] bg-[#f5f5f7] px-3 py-2.5">
-            <span class="image-chip"><img src="${esc(icon.url)}" style="width:20px;height:20px;border-radius:5px;object-fit:cover"><span class="truncate">${esc(icon.name)}</span></span>
-            <button type="button" class="btn-ghost py-1 px-2" onclick="removeSoftwareIcon()"><i class="ph ph-trash"></i> Remove</button>
-        </div>` : '';
+    target.innerHTML = icon ? renderSingleProductImage(icon, 'removeSoftwareIcon()') : '';
 }
 
 function handleSoftwareImageUpload(input) {
@@ -2505,13 +2507,29 @@ function clearEditSwImages() {
 function renderEditSwIconStatus() {
     const statusEl = document.getElementById('edit-p-icon-status');
     if (!statusEl) return;
-    statusEl.innerHTML = editSwIcon ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><img src="${esc(editSwIcon.url)}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:cover"> ${esc(editSwIcon.name)} <button type="button" onclick="editSwIcon=null;renderEditSwIconStatus();renderEditPreview('software')" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>` : '';
+    statusEl.innerHTML = editSwIcon ? renderSingleProductImage(editSwIcon, 'removeEditSoftwareIcon()') : '';
 }
 
 function renderEditHwImageStatus() {
     const statusEl = document.getElementById('edit-p-hw-image-status');
     if (!statusEl) return;
-    statusEl.innerHTML = editHwImage ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><img src="${esc(editHwImage.url)}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:cover"> ${esc(editHwImage.name)} <button type="button" onclick="editHwImage=null;renderEditHwImageStatus();renderEditPreview('hardware')" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>` : '';
+    statusEl.innerHTML = editHwImage ? renderSingleProductImage(editHwImage, 'removeEditHardwareImage()') : '';
+}
+
+function removeEditSoftwareIcon() {
+    editSwIcon = null;
+    const input = document.getElementById('edit-p-icon');
+    if (input) input.value = '';
+    renderEditSwIconStatus();
+    renderEditPreview('software');
+}
+
+function removeEditHardwareImage() {
+    editHwImage = null;
+    const input = document.getElementById('edit-p-hw-image');
+    if (input) input.value = '';
+    renderEditHwImageStatus();
+    renderEditPreview('hardware');
 }
 
 function handleEditSwImageUpload(input) {
