@@ -331,8 +331,14 @@ const HW_KEY_SPEC_MIN_ITEMS = 3;
 const HW_KEY_SPEC_MAX_CHARS = 150;
 const SOFTWARE_FEATURE_MAX_ITEMS = 5;
 const SOFTWARE_FEATURE_MAX_CHARS = 150;
-const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-const PRODUCT_IMAGE_ERROR = 'File exceeds the size limit or the format is invalid.';
+// UI copy uses decimal MB; keep the client limit aligned with typical API/proxy limits.
+const PRODUCT_IMAGE_MAX_BYTES = 5 * 1000 * 1000;
+const PRODUCT_IMAGE_MAX_COUNT = 5;
+const PRODUCT_IMAGE_VALIDATION_MESSAGES = Object.freeze({
+    required: 'Please upload Product Image.',
+    file: 'File exceeds the 5MB size limit or the format is invalid. Only JPG, JPEG, and PNG files are supported.',
+    count: `You can upload up to ${PRODUCT_IMAGE_MAX_COUNT} images.`,
+});
 
 // ── Shared empty-state copy (used by every list via emptyState()) ──
 const EMPTY_STATE_NO_DATA = 'No matching data found.';

@@ -1063,6 +1063,7 @@ function setCreateError(id, message = '') {
     const el = document.getElementById(id);
     const err = document.getElementById(`${id}-error`);
     if (el) el.classList.toggle('field-error', !!message);
+    if (el?.type === 'file') el.closest('.file-upload-wrap')?.classList.toggle('field-error', !!message);
     if (err) err.textContent = message;
 }
 
@@ -1070,11 +1071,44 @@ function valueOf(id) {
     return document.getElementById(id)?.value?.trim() || '';
 }
 
-function isValidProductImageFile(file) {
-    if (!file) return false;
-    const nameOk = /\.(jpe?g|png)$/i.test(file.name || '');
-    const typeOk = !file.type || ['image/jpeg', 'image/jpg', 'image/png'].includes(file.type);
-    return nameOk && typeOk && Number(file.size || 0) <= PRODUCT_IMAGE_MAX_BYTES;
+function validateProductImageFiles(files, { currentCount = 0, maxCount = null, required = false } = {}) {
+    const selectedFiles = Array.from(files || []);
+    if (!selectedFiles.length) {
+        return required
+            ? { valid: false, code: 'required', message: PRODUCT_IMAGE_VALIDATION_MESSAGES.required }
+            : { valid: true, code: null, message: '' };
+    }
+
+    const invalidFormatFile = selectedFiles.find(file => {
+        const nameOk = /\.(jpe?g|png)$/i.test(file.name || '');
+        const typeOk = !file.type || ['image/jpeg', 'image/jpg', 'image/png'].includes(file.type);
+        return !nameOk || !typeOk;
+    });
+    if (invalidFormatFile) {
+        return { valid: false, code: 'format', message: PRODUCT_IMAGE_VALIDATION_MESSAGES.file, file: invalidFormatFile };
+    }
+
+    const oversizedFile = selectedFiles.find(file => Number(file.size || 0) > PRODUCT_IMAGE_MAX_BYTES);
+    if (oversizedFile) {
+        return { valid: false, code: 'size', message: PRODUCT_IMAGE_VALIDATION_MESSAGES.file, file: oversizedFile };
+    }
+
+    if (maxCount !== null && currentCount + selectedFiles.length > maxCount) {
+        return { valid: false, code: 'count', message: PRODUCT_IMAGE_VALIDATION_MESSAGES.count };
+    }
+
+    return { valid: true, code: null, message: '' };
+}
+
+function setProductImageValidationError(id, validation) {
+    const fileName = validation.file?.name;
+    const message = fileName ? `${fileName}: ${validation.message}` : validation.message;
+    if (validation.code === 'count') {
+        setCreateError(id, '');
+        showToast(message, 'error');
+        return;
+    }
+    setCreateError(id, message);
 }
 
 function getMatchingVendorId(vendorName, vendorType) {
@@ -1180,6 +1214,24 @@ function getProductInitials(name) {
     return text.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
+function renderSortableProductImage(img, index, context) {
+    const removeHandler = context === 'edit' ? `removeEditSwImage(${index})` : `removeSoftwareImage(${index})`;
+    return `<div class="product-image-sort-item" draggable="true" title="Drag to reorder"
+        ondragstart="onProductImageDragStart(event,'${context}',${index})"
+        ondragover="onProductImageDragOver(event)"
+        ondragleave="onProductImageDragLeave(event)"
+        ondrop="onProductImageDrop(event,'${context}',${index})"
+        ondragend="onProductImageDragEnd(event)">
+        <i class="ph ph-dots-six-vertical product-image-sort-grip" aria-hidden="true"></i>
+        <img class="product-image-sort-thumb" src="${esc(img.url)}" alt="" draggable="false">
+        <span class="product-image-sort-name">${esc(img.name)}</span>
+        ${index === 0 ? '<span class="product-image-primary-badge">Main</span>' : ''}
+        <button type="button" class="product-image-sort-remove" aria-label="Remove ${esc(img.name)}" onclick="event.stopPropagation();${removeHandler}">
+            <i class="ph ph-x"></i>
+        </button>
+    </div>`;
+}
+
 function renderImageStatus(type) {
     const target = document.getElementById(type === 'hardware' ? 'hardware-image-status' : 'software-image-status');
     if (!target) return;
@@ -1195,12 +1247,13 @@ function renderImageStatus(type) {
     const imgs = createProductState.softwareImages;
     target.innerHTML = `
         <div class="flex items-center justify-between mb-2">
-            <span class="text-[10px] text-[#86868b] font-bold">${imgs.length}/5 images</span>
+            <span class="text-[10px] text-[#86868b] font-bold">${imgs.length}/${PRODUCT_IMAGE_MAX_COUNT} images</span>
             ${imgs.length ? '<button type="button" class="btn-ghost py-1 px-2" onclick="clearSoftwareImages()"><i class="ph ph-trash"></i> Delete all</button>' : ''}
         </div>
-        <div class="flex flex-wrap gap-2">
-            ${imgs.map((img, idx) => `<span class="image-chip"><i class="ph ph-image"></i><span class="truncate max-w-[150px]">${esc(img.name)}</span><button type="button" class="text-aiso" onclick="removeSoftwareImage(${idx})"><i class="ph ph-x"></i></button></span>`).join('')}
-        </div>`;
+        <div class="product-image-sort-list">
+            ${imgs.map((img, idx) => renderSortableProductImage(img, idx, 'create')).join('')}
+        </div>
+        ${imgs.length > 1 ? '<div class="product-image-sort-hint"><i class="ph ph-arrows-out-line-horizontal"></i> Drag images to reorder. The first image is the main image.</div>' : ''}`;
 }
 
 function handleHardwareImageUpload(input) {
@@ -1212,10 +1265,11 @@ function handleHardwareImageUpload(input) {
         renderCreateProductPreview('hardware');
         return;
     }
-    if (!isValidProductImageFile(file)) {
+    const validation = validateProductImageFiles([file], { required: true });
+    if (!validation.valid) {
         input.value = '';
         createProductState.hardwareImage = null;
-        setCreateError('new-p-image', PRODUCT_IMAGE_ERROR);
+        setProductImageValidationError('new-p-image', validation);
         renderImageStatus('hardware');
         renderCreateProductPreview('hardware');
         return;
@@ -1244,10 +1298,11 @@ function handleSoftwareIconUpload(input) {
         renderCreateProductPreview('software');
         return;
     }
-    if (!isValidProductImageFile(file)) {
+    const validation = validateProductImageFiles([file], { required: true });
+    if (!validation.valid) {
         input.value = '';
         createProductState.softwareIcon = null;
-        setCreateError('new-p-icon', PRODUCT_IMAGE_ERROR);
+        setProductImageValidationError('new-p-icon', validation);
         renderIconStatus();
         renderCreateProductPreview('software');
         return;
@@ -1282,18 +1337,16 @@ function handleSoftwareImageUpload(input) {
     const files = Array.from(input.files || []);
     setCreateError('new-p-images', '');
     if (!files.length) return;
-    if (files.some(file => !isValidProductImageFile(file))) {
+    const validation = validateProductImageFiles(files, {
+        currentCount: createProductState.softwareImages.length,
+        maxCount: PRODUCT_IMAGE_MAX_COUNT,
+    });
+    if (!validation.valid) {
         input.value = '';
-        setCreateError('new-p-images', PRODUCT_IMAGE_ERROR);
+        setProductImageValidationError('new-p-images', validation);
         return;
     }
-    const remaining = 5 - createProductState.softwareImages.length;
-    if (remaining <= 0 || files.length > remaining) {
-        input.value = '';
-        setCreateError('new-p-images', 'Maximum 5 images.');
-        return;
-    }
-    createProductState.softwareImages.push(...files.slice(0, remaining).map(file => {
+    createProductState.softwareImages.push(...files.map(file => {
         const obj = { file, name: file.name, url: URL.createObjectURL(file) };
         Store.compressImage(file).then(d => { obj.dataUrl = d; }).catch(() => {});
         return obj;
@@ -1313,6 +1366,57 @@ function clearSoftwareImages() {
     createProductState.softwareImages = [];
     renderImageStatus('software');
     renderCreateProductPreview('software');
+}
+
+let productImageDragContext = null;
+let productImageDragIndex = null;
+
+function onProductImageDragStart(e, context, index) {
+    productImageDragContext = context;
+    productImageDragIndex = index;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', `${context}:${index}`); } catch (err) { /* ignore */ }
+    e.currentTarget.classList.add('is-dragging');
+}
+
+function onProductImageDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    e.currentTarget.classList.add('drag-over');
+}
+
+function onProductImageDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+}
+
+function onProductImageDragEnd(e) {
+    e.currentTarget.classList.remove('is-dragging');
+    document.querySelectorAll('.product-image-sort-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+    productImageDragContext = null;
+    productImageDragIndex = null;
+}
+
+function onProductImageDrop(e, context, targetIndex) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    const fromIndex = productImageDragIndex;
+    if (productImageDragContext !== context || fromIndex === null || fromIndex === targetIndex) return;
+
+    const images = context === 'edit' ? editSwImages : createProductState.softwareImages;
+    if (fromIndex < 0 || fromIndex >= images.length || targetIndex < 0 || targetIndex >= images.length) return;
+    const [moved] = images.splice(fromIndex, 1);
+    images.splice(targetIndex, 0, moved);
+    productImageDragContext = null;
+    productImageDragIndex = null;
+    previewGalleryIndex = 0;
+
+    if (context === 'edit') {
+        renderEditSwImageStatus();
+        renderEditPreview('software');
+    } else {
+        renderImageStatus('software');
+        renderCreateProductPreview('software');
+    }
 }
 
 const HW_NS_MAX_ITEMS = 8; // Platform + Key Specs combined max
@@ -1627,6 +1731,10 @@ function setupCreateProductBindings(type) {
     if (!form) return;
     const rerender = () => renderCreateProductPreview(type);
     form.querySelectorAll('input, textarea, select').forEach(el => {
+        // File inputs have dedicated upload handlers that own validation and
+        // preview updates. A generic change listener would immediately clear
+        // an upload error raised by those handlers during the same event.
+        if (el.type === 'file') return;
         el.addEventListener('input', () => {
             setCreateError(el.id, '');
             if (el.id.startsWith('new-p-feature-')) {
@@ -1682,8 +1790,12 @@ function validateCreateProductForm(type) {
                 setCreateError('new-p-ns', '');
             }
         }
-        if (!createProductState.hardwareImage) {
-            setCreateError('new-p-image', 'Please upload Product Image.');
+        const imageValidation = validateProductImageFiles(
+            createProductState.hardwareImage ? [createProductState.hardwareImage.file] : [],
+            { required: true },
+        );
+        if (!imageValidation.valid) {
+            setCreateError('new-p-image', imageValidation.message);
             ok = false;
         }
     } else {
@@ -1819,9 +1931,9 @@ function showCreateProductModal(type) {
         <div>
             <label class="field-label">Product Icon</label>
             <label class="file-upload-wrap">
-                <input id="new-p-icon" type="file" accept=".jpg,.jpeg,.png,.svg,image/jpeg,image/png,image/svg+xml" onchange="handleSoftwareIconUpload(this)">
+                <input id="new-p-icon" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleSoftwareIconUpload(this)">
                 <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
-                <span class="file-upload-text">Square icon · Max 5MB · JPG / PNG / SVG</span>
+                <span class="file-upload-text">Square icon · Max 5MB · JPG / JPEG / PNG</span>
             </label>
             <div id="new-p-icon-error" class="field-error-text"></div>
             <div id="software-icon-status" class="mt-2"></div>
@@ -1851,7 +1963,7 @@ function showCreateProductModal(type) {
             <label class="file-upload-wrap">
                 <input id="new-p-images" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple onchange="handleSoftwareImageUpload(this)">
                 <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose Files</span>
-                <span class="file-upload-text">Max 5 images · 5MB each · JPG / PNG</span>
+                <span class="file-upload-text">Max ${PRODUCT_IMAGE_MAX_COUNT} images · 5MB each · JPG / JPEG / PNG</span>
             </label>
             <div id="new-p-images-error" class="field-error-text"></div>
             <div id="software-image-status" class="mt-2"></div>
@@ -2040,7 +2152,7 @@ function showEditProductModal(pid, source) {
                 <label class="file-upload-wrap">
                     <input id="edit-p-images" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple onchange="handleEditSwImageUpload(this)">
                     <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose Files</span>
-                    <span class="file-upload-text">Max 5 images · 5MB each · JPG / PNG</span>
+                    <span class="file-upload-text">Max ${PRODUCT_IMAGE_MAX_COUNT} images · 5MB each · JPG / JPEG / PNG</span>
                 </label>
                 <div id="edit-p-images-error" class="field-error-text"></div>
             </div>
@@ -2050,7 +2162,7 @@ function showEditProductModal(pid, source) {
                 <label class="file-upload-wrap">
                     <input id="edit-p-icon" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleEditSwIconUpload(this)">
                     <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
-                    <span class="file-upload-text">Square icon for logo mark</span>
+                    <span class="file-upload-text">Square icon · Max 5MB · JPG / JPEG / PNG</span>
                 </label>
                 <div id="edit-p-icon-error" class="field-error-text"></div>
             </div>
@@ -2371,10 +2483,11 @@ function renderEditSwImageStatus() {
     if (!photos.length) { container.innerHTML = ''; return; }
     container.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <span style="font-size:11px;color:#86868b;font-weight:600">${photos.length}/5 images</span>
+            <span style="font-size:11px;color:#86868b;font-weight:600">${photos.length}/${PRODUCT_IMAGE_MAX_COUNT} images</span>
             <button type="button" onclick="clearEditSwImages()" style="font-size:11px;color:#d97706;font-weight:600;background:none;border:none;cursor:pointer">Clear all</button>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">${photos.map((img, i) => `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;background:#f5f5f7;font-size:11px;color:#1d1d1f;font-weight:500"><img src="${esc(img.url)}" alt="" style="width:18px;height:18px;border-radius:4px;object-fit:cover"> ${esc(img.name)} <button type="button" onclick="removeEditSwImage(${i})" style="background:none;border:none;cursor:pointer;color:#86868b;font-size:12px;padding:0">&times;</button></span>`).join('')}</div>`;
+        <div class="product-image-sort-list">${photos.map((img, i) => renderSortableProductImage(img, i, 'edit')).join('')}</div>
+        ${photos.length > 1 ? '<div class="product-image-sort-hint"><i class="ph ph-arrows-out-line-horizontal"></i> Drag images to reorder. The first image is the main image.</div>' : ''}`;
 }
 
 function removeEditSwImage(index) {
@@ -2402,17 +2515,14 @@ function renderEditHwImageStatus() {
 }
 
 function handleEditSwImageUpload(input) {
-    const errEl = document.getElementById('edit-p-images-error');
-    if (errEl) errEl.textContent = '';
+    setCreateError('edit-p-images', '');
     const files = Array.from(input.files || []);
-    if (files.some(file => !isValidProductImageFile(file))) {
-        if (errEl) errEl.textContent = PRODUCT_IMAGE_ERROR;
-        input.value = '';
-        return;
-    }
-    const remaining = 5 - editSwImages.length;
-    if (files.length > remaining) {
-        if (errEl) errEl.textContent = 'Maximum 5 images.';
+    const validation = validateProductImageFiles(files, {
+        currentCount: editSwImages.length,
+        maxCount: PRODUCT_IMAGE_MAX_COUNT,
+    });
+    if (!validation.valid) {
+        setProductImageValidationError('edit-p-images', validation);
         input.value = '';
         return;
     }
@@ -2427,12 +2537,12 @@ function handleEditSwImageUpload(input) {
 }
 
 function handleEditSwIconUpload(input) {
-    const errEl = document.getElementById('edit-p-icon-error');
-    if (errEl) errEl.textContent = '';
+    setCreateError('edit-p-icon', '');
     const file = input.files?.[0];
     if (!file) return;
-    if (!isValidProductImageFile(file)) {
-        if (errEl) errEl.textContent = PRODUCT_IMAGE_ERROR;
+    const validation = validateProductImageFiles([file], { required: true });
+    if (!validation.valid) {
+        setProductImageValidationError('edit-p-icon', validation);
         input.value = ''; return;
     }
     editSwIcon = { file, name: file.name, url: URL.createObjectURL(file) };
@@ -2443,12 +2553,12 @@ function handleEditSwIconUpload(input) {
 }
 
 function handleEditHwImageUpload(input) {
-    const errEl = document.getElementById('edit-p-hw-image-error');
-    if (errEl) errEl.textContent = '';
+    setCreateError('edit-p-hw-image', '');
     const file = input.files?.[0];
     if (!file) return;
-    if (!isValidProductImageFile(file)) {
-        if (errEl) errEl.textContent = PRODUCT_IMAGE_ERROR;
+    const validation = validateProductImageFiles([file], { required: true });
+    if (!validation.valid) {
+        setProductImageValidationError('edit-p-hw-image', validation);
         input.value = ''; return;
     }
     editHwImage = { file, name: file.name, url: URL.createObjectURL(file) };
