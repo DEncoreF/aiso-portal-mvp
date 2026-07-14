@@ -4,6 +4,8 @@
 
 function esc(v) { return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+let portalMutationDepth = 0;
+
 function logActivity(action, productName, detail = '', pid = null) {
     const ts = new Date().toISOString();
     const entry = { action, productName, detail, timestamp: ts, user: currentUser?.name || 'System' };
@@ -15,7 +17,55 @@ function logActivity(action, productName, detail = '', pid = null) {
         if (!p.history) p.history = [];
         p.history.unshift({ action, detail, timestamp: ts, user: entry.user });
     }
-    Store.save();
+    return portalMutationDepth > 0 ? true : Store.save();
+}
+
+function capturePortalState() {
+    return JSON.parse(JSON.stringify({
+        PRODUCTS,
+        ACTIVITY_LOG,
+        HARDWARE_PRODUCT_TYPES,
+        SOFTWARE_CATEGORY_OPTIONS,
+        SOFTWARE_INDUSTRY_OPTIONS,
+    }));
+}
+
+function restorePortalState(snapshot) {
+    PRODUCTS = snapshot.PRODUCTS;
+    ACTIVITY_LOG = snapshot.ACTIVITY_LOG;
+    HARDWARE_PRODUCT_TYPES = snapshot.HARDWARE_PRODUCT_TYPES;
+    SOFTWARE_CATEGORY_OPTIONS = snapshot.SOFTWARE_CATEGORY_OPTIONS;
+    SOFTWARE_INDUSTRY_OPTIONS = snapshot.SOFTWARE_INDUSTRY_OPTIONS;
+}
+
+// Treat each UI mutation like an API transaction. If persistence fails, roll the
+// in-memory changes back and report the failure. Callers close their modal only
+// after this function returns true, so the user's input remains available.
+function commitPortalMutation(
+    mutate,
+    failureMessage = 'Unable to save changes. Please try again.',
+    persist = () => Store.save({ notify: false })
+) {
+    const snapshot = capturePortalState();
+    portalMutationDepth += 1;
+    try {
+        mutate();
+    } catch (error) {
+        console.error('Portal mutation failed:', error);
+        restorePortalState(snapshot);
+        showToast(failureMessage, 'error');
+        return false;
+    } finally {
+        portalMutationDepth -= 1;
+    }
+    try {
+        if (persist()) return true;
+    } catch (error) {
+        console.error('Portal persistence failed:', error);
+    }
+    restorePortalState(snapshot);
+    showToast(failureMessage, 'error');
+    return false;
 }
 
 function canManageProduct(p) { return true; /* Super Admin has full access */ }
@@ -67,23 +117,43 @@ function emptyState(icon, message, extra = '') {
     </div>`;
 }
 
-// ── Shared HTTP error screen ──
-// Same visual language as the empty state: centered icon + status code + copy,
-// plus an optional action button. Intended for future API wiring; previewable
-// today from Settings → Error State Demo.
-function renderErrorState(code, actionHtml = '') {
+// ── Shared full-page HTTP error screen ──
+function renderErrorState(code) {
     const message = (typeof HTTP_ERROR_MESSAGES !== 'undefined' && HTTP_ERROR_MESSAGES[code])
         || 'Something went wrong. Please try again later.';
-    return `<div class="flex flex-col items-center gap-3 text-center" style="padding:1rem 0">
-        <i class="ph ph-warning-octagon text-[#c7c7cc]" style="font-size:3rem"></i>
-        <div class="text-2xl font-bold text-[#1d1d1f]">${esc(String(code))}</div>
-        <div class="text-sm text-[#86868b] font-semibold" style="max-width:360px">${esc(message)}</div>
-        ${actionHtml}
-    </div>`;
+    return `<section class="http-error-page" role="alert" aria-labelledby="http-error-code">
+        <div class="http-error-scene" aria-hidden="true">
+            <div class="http-error-ufo">
+                <span class="http-error-dome"></span>
+                <span class="http-error-ring"></span>
+            </div>
+            <div class="http-error-beam"></div>
+        </div>
+        <div class="http-error-content">
+            <h1 id="http-error-code" class="http-error-code">${esc(String(code))}</h1>
+            <p class="http-error-message">${esc(message)}</p>
+            <button type="button" onclick="hideErrorState();navigate('sw-products')" class="http-error-home">
+                <i class="ph ph-arrow-left"></i> Take me home
+            </button>
+        </div>
+    </section>`;
 }
 
 function showErrorStateDemo(code) {
-    showModal(renderErrorState(code, '<button onclick="closeModal()" class="btn-primary" style="margin-top:8px"><i class="ph ph-arrow-left"></i> Back</button>'));
+    const root = document.getElementById('error-state-root');
+    if (!root) return;
+    closeModal();
+    root.innerHTML = renderErrorState(code);
+    root.hidden = false;
+    document.body.style.overflow = 'hidden';
+}
+
+function hideErrorState() {
+    const root = document.getElementById('error-state-root');
+    if (!root) return;
+    root.hidden = true;
+    root.innerHTML = '';
+    document.body.style.overflow = '';
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -505,11 +575,14 @@ function doUnpublish(pid, force = false) {
     if (!p) return;
     if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
         if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `doUnpublish('${pid}', true)`); return; }
-        removeCompatRefs(pid);
     }
-    p.status = 'draft';
-    p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Unpublished', p.name, 'Removed from storefront — back to Draft');
+    const saved = commitPortalMutation(() => {
+        if (p.product_type === 'hardware' && findCompatRefs(pid).length) removeCompatRefs(pid);
+        p.status = 'draft';
+        p.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Unpublished', p.name, 'Removed from storefront — back to Draft');
+    });
+    if (!saved) return;
     closeModal();
     showToast(`${p.name} has been unpublished`, 'info');
     reRenderCurrentList();
@@ -525,13 +598,17 @@ function archiveProduct(pid, force = false) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
     if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
-        if (!force) { showHwCompatConflictModal(pid, 'Archive', `closeModal();archiveProduct('${pid}', true)`); return; }
-        removeCompatRefs(pid);
+        if (!force) { showHwCompatConflictModal(pid, 'Archive', `archiveProduct('${pid}', true)`); return; }
     }
     const prevLabel = p.status === 'published' ? 'Published' : 'Draft';
-    p.status = 'archived';
-    p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Archived', p.name, `Archived from ${prevLabel}`);
+    const saved = commitPortalMutation(() => {
+        if (p.product_type === 'hardware' && findCompatRefs(pid).length) removeCompatRefs(pid);
+        p.status = 'archived';
+        p.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Archived', p.name, `Archived from ${prevLabel}`);
+    });
+    if (!saved) return;
+    closeModal();
     showToast(`${p.name} has been archived.`, 'success');
     reRenderCurrentList();
 }
@@ -539,9 +616,12 @@ function archiveProduct(pid, force = false) {
 function restoreProduct(pid) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
-    p.status = 'draft';
-    p.updated_at = new Date().toISOString().slice(0, 10);
-    logActivity('Restored', p.name, 'Restored to Draft');
+    const saved = commitPortalMutation(() => {
+        p.status = 'draft';
+        p.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Restored', p.name, 'Restored to Draft');
+    });
+    if (!saved) return;
     showToast(`${p.name} has been restored as a draft.`, 'success');
     reRenderCurrentList();
 }
@@ -572,11 +652,14 @@ function doDeleteProduct(pid, force = false) {
     }
     if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
         if (!force) { showHwCompatConflictModal(pid, 'Delete', `doDeleteProduct('${pid}', true)`); return; }
-        removeCompatRefs(pid);
     }
     const name = p.name;
-    PRODUCTS.splice(PRODUCTS.indexOf(p), 1);
-    logActivity('Deleted', name, 'Product permanently removed');
+    const saved = commitPortalMutation(() => {
+        if (p.product_type === 'hardware' && findCompatRefs(pid).length) removeCompatRefs(pid);
+        PRODUCTS.splice(PRODUCTS.indexOf(p), 1);
+        logActivity('Deleted', name, 'Product permanently removed');
+    });
+    if (!saved) return;
     closeModal();
     showToast(`${name} has been permanently deleted.`, 'success');
     reRenderCurrentList();
@@ -642,31 +725,38 @@ function togglePublish(pid, force = false) {
 
     if (p.status === 'published') {
         if (p.product_type === 'hardware' && findCompatRefs(pid).length) {
-            if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `closeModal();togglePublish('${pid}', true)`); return; }
-            removeCompatRefs(pid);
+            if (!force) { showHwCompatConflictModal(pid, 'Unpublish', `togglePublish('${pid}', true)`); return; }
         }
-        p.status = 'draft';
-        p.updated_at = new Date().toISOString().slice(0, 10);
-        logActivity('Unpublished', p.name, 'Removed from storefront — back to Draft');
+        const saved = commitPortalMutation(() => {
+            if (p.product_type === 'hardware' && findCompatRefs(pid).length) removeCompatRefs(pid);
+            p.status = 'draft';
+            p.updated_at = new Date().toISOString().slice(0, 10);
+            logActivity('Unpublished', p.name, 'Removed from storefront — back to Draft');
+        });
+        if (!saved) return;
+        closeModal();
         showToast(`${p.name} has been unpublished`, 'info');
     } else {
-        if (p.product_type === 'software') {
-            const staleIds = (p.compatible_hardware || []).filter(hid => {
-                const hw = PRODUCTS.find(x => x.id === hid);
-                return !hw || hw.status !== 'published';
-            });
-            if (staleIds.length) {
-                // Hard invariant: a SW can only reference published HW (enforced by the published-only
-                // picker + ref-stripping on every HW takedown). Unreachable in normal flow — drop
-                // silently as a data-integrity backstop, no prompt.
-                const staleNames = staleIds.map(hid => PRODUCTS.find(x => x.id === hid)?.name || hid);
-                p.compatible_hardware = p.compatible_hardware.filter(hid => !staleIds.includes(hid));
-                logActivity('Compatibility removed', p.name, `not-published hardware removed on publish: ${staleNames.join(', ')}`, p.id);
+        const saved = commitPortalMutation(() => {
+            if (p.product_type === 'software') {
+                const staleIds = (p.compatible_hardware || []).filter(hid => {
+                    const hw = PRODUCTS.find(x => x.id === hid);
+                    return !hw || hw.status !== 'published';
+                });
+                if (staleIds.length) {
+                    // Hard invariant: a SW can only reference published HW (enforced by the published-only
+                    // picker + ref-stripping on every HW takedown). Unreachable in normal flow — drop
+                    // silently as a data-integrity backstop, no prompt.
+                    const staleNames = staleIds.map(hid => PRODUCTS.find(x => x.id === hid)?.name || hid);
+                    p.compatible_hardware = p.compatible_hardware.filter(hid => !staleIds.includes(hid));
+                    logActivity('Compatibility removed', p.name, `not-published hardware removed on publish: ${staleNames.join(', ')}`, p.id);
+                }
             }
-        }
-        p.status = 'published';
-        p.updated_at = new Date().toISOString().slice(0, 10);
-        logActivity('Published', p.name, 'Listed on storefront');
+            p.status = 'published';
+            p.updated_at = new Date().toISOString().slice(0, 10);
+            logActivity('Published', p.name, 'Listed on storefront');
+        });
+        if (!saved) return;
         showToast(`${p.name} is now published!`, 'success');
     }
     reRenderCurrentList();
@@ -2075,8 +2165,11 @@ function createProduct(type) {
         }
     }
 
-    PRODUCTS.push(newP);
-    logActivity('Created', name, 'New draft created');
+    const saved = commitPortalMutation(() => {
+        PRODUCTS.push(newP);
+        logActivity('Created', name, 'New draft created');
+    });
+    if (!saved) return;
     closeModal();
     showToast(`${name} has been created as a draft.`, 'success');
     navigate(isSW ? 'sw-products' : 'hw-products');
@@ -2616,63 +2709,67 @@ async function saveProduct(pid) {
         editHwImage?.dataPromise,
     ].filter(Boolean));
 
-    p.name = val('edit-p-name') || p.name;
-    if (!isNsHw) p.vendor_name = val('edit-p-vendor') || p.vendor_name;
-    p.updated_at = new Date().toISOString().slice(0, 10);
-
-    if (isSW) {
-        p.categories = getCheckedValues('edit-p-categories').slice(0, SW_CATEGORY_MAX);
-        p.sub_category = p.categories[0] || p.sub_category;
-        p.tagline = val('edit-p-tagline');
-        p.features = Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => val(`edit-p-feat-${i}`)).filter(Boolean);
-        p.industries = Array.from(document.querySelectorAll('#edit-p-industries input:checked')).map(cb => cb.value);
-        p.compatible_hardware = Array.from(document.querySelectorAll('#edit-p-compat-hw input:checked')).map(cb => cb.value);
-        const photoData = editSwImages.map(img => img.dataUrl || img.url || '').filter(Boolean);
-        p.photos = editSwImages.map(img => img.name);
-        p.image_name = editSwImages[0]?.name || '';
-        p.photos_data = photoData;
-        p.image_data = photoData[0] || '';
-        p.icon_name = editSwIcon?.name || '';
-        p.icon_data = editSwIcon?.dataUrl || editSwIcon?.url || '';
-    } else {
-        const hwFmt = p.product_format || 'standard';
-        p.sub_category = val('edit-p-hw-type') || p.sub_category;
-        p.is_aidaptiv = document.getElementById('edit-p-aidaptiv')?.checked || false;
-        if (hwFmt === 'standard') {
-            p.brand = val('edit-p-brand') || p.brand;
-            p.model = val('edit-p-model') || p.model;
-            p.key_specifications = collectNsItems('edit-p-spec');
-        } else {
-            p.ns_platforms = collectNsItems('edit-p-platform');
-            p.key_specifications = collectNsItems('edit-p-nsspec');
-        }
-        const hwImageData = editHwImage?.dataUrl || editHwImage?.url || '';
-        p.image_name = editHwImage?.name || '';
-        p.photos = editHwImage ? [editHwImage.name] : [];
-        p.image_data = hwImageData;
-        p.photos_data = hwImageData ? [hwImageData] : [];
-    }
-
-    // Reset edit image state
-    editSwImages = []; editSwIcon = null; editHwImage = null;
-
     // Editing a live (published) product sends it back to Draft so the
     // change must be re-published before it goes live again. Drafts /
     // archived keep their status.
     const wasPublished = p.status === 'published';
     let strippedRefs = 0;
-    if (wasPublished) {
-        p.status = 'draft';
-        // A referenced HW reverting to Draft would leave stale SW compatibility refs;
-        // strip them now (same cleanup as unpublish/archive/delete) so nothing dangles.
-        if (p.product_type === 'hardware') {
-            strippedRefs = findCompatRefs(p.id).length;
-            if (strippedRefs) removeCompatRefs(p.id);
-        }
-    }
+    const saved = commitPortalMutation(() => {
+        p.name = val('edit-p-name') || p.name;
+        if (!isNsHw) p.vendor_name = val('edit-p-vendor') || p.vendor_name;
+        p.updated_at = new Date().toISOString().slice(0, 10);
 
-    logActivity('Updated', p.name, 'Draft updated');
-    if (wasPublished) logActivity('Unpublished', p.name, 'Edited while live — moved to Draft, re-publish to go live');
+        if (isSW) {
+            p.categories = getCheckedValues('edit-p-categories').slice(0, SW_CATEGORY_MAX);
+            p.sub_category = p.categories[0] || p.sub_category;
+            p.tagline = val('edit-p-tagline');
+            p.features = Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => val(`edit-p-feat-${i}`)).filter(Boolean);
+            p.industries = Array.from(document.querySelectorAll('#edit-p-industries input:checked')).map(cb => cb.value);
+            p.compatible_hardware = Array.from(document.querySelectorAll('#edit-p-compat-hw input:checked')).map(cb => cb.value);
+            const photoData = editSwImages.map(img => img.dataUrl || img.url || '').filter(Boolean);
+            p.photos = editSwImages.map(img => img.name);
+            p.image_name = editSwImages[0]?.name || '';
+            p.photos_data = photoData;
+            p.image_data = photoData[0] || '';
+            p.icon_name = editSwIcon?.name || '';
+            p.icon_data = editSwIcon?.dataUrl || editSwIcon?.url || '';
+        } else {
+            const hwFmt = p.product_format || 'standard';
+            p.sub_category = val('edit-p-hw-type') || p.sub_category;
+            p.is_aidaptiv = document.getElementById('edit-p-aidaptiv')?.checked || false;
+            if (hwFmt === 'standard') {
+                p.brand = val('edit-p-brand') || p.brand;
+                p.model = val('edit-p-model') || p.model;
+                p.key_specifications = collectNsItems('edit-p-spec');
+            } else {
+                p.ns_platforms = collectNsItems('edit-p-platform');
+                p.key_specifications = collectNsItems('edit-p-nsspec');
+            }
+            const hwImageData = editHwImage?.dataUrl || editHwImage?.url || '';
+            p.image_name = editHwImage?.name || '';
+            p.photos = editHwImage ? [editHwImage.name] : [];
+            p.image_data = hwImageData;
+            p.photos_data = hwImageData ? [hwImageData] : [];
+        }
+
+        if (wasPublished) {
+            p.status = 'draft';
+            // A referenced HW reverting to Draft would leave stale SW compatibility refs;
+            // strip them now (same cleanup as unpublish/archive/delete) so nothing dangles.
+            if (p.product_type === 'hardware') {
+                strippedRefs = findCompatRefs(p.id).length;
+                if (strippedRefs) removeCompatRefs(p.id);
+            }
+        }
+
+        logActivity('Updated', p.name, 'Draft updated');
+        if (wasPublished) logActivity('Unpublished', p.name, 'Edited while live — moved to Draft, re-publish to go live');
+    });
+    if (!saved) return;
+
+    // Reset temporary image state only after the save succeeds. A failed submit
+    // leaves both the modal and its selected files intact for retrying.
+    editSwImages = []; editSwIcon = null; editHwImage = null;
     closeModal();
     showToast(wasPublished
         ? `${p.name} updated — moved to Draft${strippedRefs ? `, removed from ${strippedRefs} software` : ''}. Re-publish to make it live.`
@@ -2686,6 +2783,104 @@ async function saveProduct(pid) {
 // ═══════════════════════════════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════════════════════════════
+
+const MODAL_FAILURE_DEMOS = Object.freeze({
+    create: {
+        title: 'Add product',
+        description: 'Enter a product name and submit. The simulated API will fail before the draft is saved.',
+        submitLabel: 'Create Draft',
+        icon: 'ph-plus-circle',
+    },
+    edit: {
+        title: 'Edit product',
+        description: 'Change the product name and save. The simulated API will fail and the original data will be restored.',
+        submitLabel: 'Save Changes',
+        icon: 'ph-pencil-simple',
+    },
+    delete: {
+        title: 'Delete product',
+        description: 'Submit the deletion request. The simulated API will fail and the product will remain available.',
+        submitLabel: 'Delete Product',
+        icon: 'ph-trash',
+        destructive: true,
+    },
+    unpublish: {
+        title: 'Unpublish product',
+        description: 'Submit the unpublish request. The simulated API will fail and the published status will be restored.',
+        submitLabel: 'Unpublish',
+        icon: 'ph-arrow-line-down',
+    },
+});
+
+function showModalFailureDemo(action) {
+    const config = MODAL_FAILURE_DEMOS[action];
+    if (!config) return;
+    const product = action === 'unpublish'
+        ? PRODUCTS.find(item => item.status === 'published')
+        : PRODUCTS[0];
+    const productId = product?.id || '';
+    const fieldLabel = action === 'delete' ? 'Type the product name to confirm' : 'Product Name';
+    const fieldValue = action === 'create' ? 'API Failure Test Product' : (product?.name || 'Sample Product');
+    const buttonStyle = config.destructive ? 'background:#dc2626' : (action === 'unpublish' ? 'background:#d97706' : '');
+
+    showModal(`
+        <form id="modal-failure-demo-form" onsubmit="event.preventDefault();submitModalFailureDemo('${action}','${esc(productId)}')">
+            <div style="text-align:center;padding:0.35rem 0 0.15rem">
+                <div style="width:56px;height:56px;border-radius:16px;background:${config.destructive ? '#fef2f2' : '#eef1ff'};display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px">
+                    <i class="ph ${config.icon}" style="font-size:28px;color:${config.destructive ? '#dc2626' : '#1432E6'}"></i>
+                </div>
+                <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">${esc(config.title)} API failure test</h3>
+                <p style="font-size:13px;color:#86868b;margin:0 0 20px;line-height:1.6">${esc(config.description)}</p>
+            </div>
+            <label class="field-label" for="modal-failure-demo-input">${esc(fieldLabel)}</label>
+            <input id="modal-failure-demo-input" class="input-field" value="${esc(fieldValue)}" autocomplete="off">
+            <div id="modal-failure-demo-status" style="min-height:36px;margin-top:10px;padding:9px 12px;border-radius:10px;background:#f5f5f7;color:#86868b;font-size:12px;line-height:1.5">
+                This test always simulates a 500 response. No portal data will be changed.
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:22px">
+                <button type="button" onclick="closeModal()" class="btn-secondary">Cancel</button>
+                <button type="submit" class="btn-primary" style="${buttonStyle}"><i class="ph ${config.icon}"></i> ${esc(config.submitLabel)}</button>
+            </div>
+        </form>`);
+}
+
+function submitModalFailureDemo(action, pid) {
+    const config = MODAL_FAILURE_DEMOS[action];
+    if (!config) return;
+    const field = document.getElementById('modal-failure-demo-input');
+    const value = (field?.value || '').trim();
+    if (!value) {
+        field?.classList.add('field-error');
+        showToast('Please enter the required value.', 'error');
+        return;
+    }
+    field?.classList.remove('field-error');
+
+    const failureMessage = `${config.title} failed: API did not respond. Please try again.`;
+    const saved = commitPortalMutation(() => {
+        const product = PRODUCTS.find(item => item.id === pid);
+        if (action === 'create') {
+            PRODUCTS.push({ id: `failure-demo-${Date.now()}`, name: value, product_type: 'software', status: 'draft' });
+        } else if (action === 'edit' && product) {
+            product.name = value;
+        } else if (action === 'delete' && product) {
+            PRODUCTS.splice(PRODUCTS.indexOf(product), 1);
+        } else if (action === 'unpublish' && product) {
+            product.status = 'draft';
+        }
+    }, failureMessage, () => false);
+
+    if (saved) {
+        closeModal();
+        return;
+    }
+    const status = document.getElementById('modal-failure-demo-status');
+    if (status) {
+        status.style.background = '#fef2f2';
+        status.style.color = '#dc2626';
+        status.textContent = '500 simulated: data was restored, and this modal and its form values remain open for retrying.';
+    }
+}
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2742,8 +2937,10 @@ function renderParamPackaging() {
 function updateSwPackaging(pid, value) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
-    p.sw_category = value;
-    Store.save();
+    if (!commitPortalMutation(() => { p.sw_category = value; })) {
+        renderParamPackaging();
+        return;
+    }
     renderParamPackaging();
     showToast(`${p.name} updated to ${value === 'included' ? 'Bundled' : 'Add-on'}`);
 }
@@ -2812,8 +3009,8 @@ function getParamContainerId(prefix) {
 function toggleParamTag(prefix, idx) {
     const arr = getParamDataArr(prefix);
     if (!arr[idx]) return;
-    arr[idx].is_active = !arr[idx].is_active;
-    Store.save();
+    const nextState = !arr[idx].is_active;
+    if (!commitPortalMutation(() => { arr[idx].is_active = nextState; })) return;
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
     showToast(`"${arr[idx].label}" ${arr[idx].is_active ? 'enabled' : 'disabled'}`);
 }
@@ -2827,14 +3024,13 @@ function addParamTag(prefix) {
         showToast('This item already exists', 'warning');
         return;
     }
-    arr.push({ label: value, is_active: true });
+    if (!commitPortalMutation(() => { arr.push({ label: value, is_active: true }); })) return;
     input.value = '';
-    Store.save();
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
     showToast(`${value} has been added successfully.`);
 }
 
-// Products currently using a given parameter value (so delete can warn / clean up).
+// Products currently using a given parameter value (so deletion can be blocked).
 function findParamTagUsage(prefix, label) {
     if (prefix === 'sw-cat') {
         return PRODUCTS.filter(p => p.product_type === 'software'
@@ -2849,19 +3045,24 @@ function findParamTagUsage(prefix, label) {
     return [];
 }
 
-// Strip a parameter value from every product that references it.
-function removeParamTagFromProducts(prefix, label) {
-    findParamTagUsage(prefix, label).forEach(p => {
-        if (prefix === 'sw-cat') {
-            p.categories = (p.categories || []).filter(c => c !== label);
-            if (p.sub_category === label) p.sub_category = p.categories[0] || '';
-        } else if (prefix === 'sw-ind') {
-            p.industries = (p.industries || []).filter(i => i !== label);
-        } else if (prefix === 'hw-type') {
-            if (p.sub_category === label) p.sub_category = '';
-        }
-        p.updated_at = new Date().toISOString().slice(0, 10);
-    });
+function showParamTagUsageBlockedModal(item, used) {
+    const refNames = used.map(p => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border:1px solid #f1f3f5;border-radius:10px;background:#fafbfc;text-align:left">
+            <span style="font-size:13px;font-weight:600;color:#1d1d1f">${esc(p.name)}</span>
+            ${statusBadge(p.status)}
+        </div>
+    `).join('');
+    showModal(`
+        <div style="text-align:center;padding:1rem 0">
+            <div style="width:56px;height:56px;border-radius:16px;background:#fef2f2;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#dc2626"></i></div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Cannot delete "${esc(item.label)}"</h3>
+            <p style="font-size:13px;color:#86868b;margin:0 0 16px;line-height:1.6">This parameter is currently used by ${used.length} product${used.length === 1 ? '' : 's'}:</p>
+            <div style="display:grid;gap:8px;max-height:260px;overflow-y:auto;margin:0 0 16px">${refNames}</div>
+            <p style="font-size:13px;color:#dc2626;background:#fef2f2;border-radius:10px;padding:10px 12px;margin:0 0 24px;line-height:1.6">Remove or replace this parameter on every product before deleting it.</p>
+            <div style="display:flex;justify-content:center">
+                <button onclick="closeModal()" class="btn-primary">Got It</button>
+            </div>
+        </div>`);
 }
 
 function confirmDeleteParamTag(prefix, idx) {
@@ -2871,30 +3072,23 @@ function confirmDeleteParamTag(prefix, idx) {
     const used = findParamTagUsage(prefix, item.label);
     // Not referenced anywhere → delete straight away.
     if (!used.length) { doDeleteParamTag(prefix, idx); return; }
-    // In use → same orange warning pattern as the hardware compatibility conflict modal.
-    const refNames = used.map(p => esc(p.name)).join('<br>');
-    showModal(`
-        <div style="text-align:center;padding:1rem 0">
-            <div style="width:56px;height:56px;border-radius:16px;background:#fff7ed;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-warning-circle" style="font-size:28px;color:#d97706"></i></div>
-            <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Delete "${esc(item.label)}"?</h3>
-            <p style="font-size:13px;color:#86868b;margin:0 0 12px;line-height:1.6">This value is currently used by:</p>
-            <div style="font-size:13px;font-weight:600;color:#1d1d1f;margin:0 0 12px;line-height:1.8">${refNames}</div>
-            <p style="font-size:13px;color:#86868b;margin:0 0 24px;line-height:1.6">Proceeding will remove it from those products.</p>
-            <div style="display:flex;gap:10px;justify-content:center">
-                <button onclick="closeModal()" class="btn-secondary">Cancel</button>
-                <button onclick="doDeleteParamTag('${prefix}', ${idx}, true)" class="btn-primary" style="background:#d97706"><i class="ph ph-warning-circle"></i> Delete Anyway</button>
-            </div>
-        </div>`);
+    // In use → block deletion until every product has been adjusted explicitly.
+    showParamTagUsageBlockedModal(item, used);
 }
 
-function doDeleteParamTag(prefix, idx, force = false) {
+function doDeleteParamTag(prefix, idx) {
     const arr = getParamDataArr(prefix);
     const item = arr[idx];
     if (!item) return;
     const label = item.label;
-    if (force) removeParamTagFromProducts(prefix, label);
-    arr.splice(idx, 1);
-    Store.save();
+    // Enforce referential integrity here as well as in the confirmation flow so
+    // this function cannot be called directly to bypass the usage check.
+    const used = findParamTagUsage(prefix, label);
+    if (used.length) {
+        showParamTagUsageBlockedModal(item, used);
+        return;
+    }
+    if (!commitPortalMutation(() => { arr.splice(idx, 1); })) return;
     closeModal();
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
     showToast(`${label} has been deleted successfully.`);
@@ -2983,8 +3177,14 @@ function onOrderDrop(e, type, targetPid) {
     const others = PRODUCTS
         .filter(p => p.product_type === type && p.status !== 'published')
         .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
-    [...published, ...others].forEach((p, i) => { p.display_order = i + 1; });
-    logActivity('Reordered', moved.name, `Reordered to position ${toIdx + 1}`, moved.id);
+    const saved = commitPortalMutation(() => {
+        [...published, ...others].forEach((p, i) => { p.display_order = i + 1; });
+        logActivity('Reordered', moved.name, `Reordered to position ${toIdx + 1}`, moved.id);
+    });
+    if (!saved) {
+        renderDisplayOrder(type);
+        return;
+    }
     renderDisplayOrder(type);
     showToast('Product order updated.');
 }

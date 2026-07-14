@@ -174,6 +174,68 @@
             margin: 0; min-height: auto; max-height: 86vh;
         }
 
+        /* Full-page HTTP error state */
+        #error-state-root[hidden] { display: none; }
+        #error-state-root { position: fixed; inset: 0; z-index: 200; }
+        .http-error-page {
+            position: relative; width: 100%; min-height: 100%; overflow: hidden;
+            display: grid; place-items: center; padding: 2rem;
+            background: #f3f6ff; color: #0c2383; text-align: center;
+        }
+        .http-error-scene {
+            position: absolute; left: 50%; top: 50%; width: min(31rem, 78vw); height: min(33rem, 72vh);
+            transform: translate(-50%, -60%); pointer-events: none;
+        }
+        .http-error-ufo {
+            position: absolute; z-index: 2; left: 50%; top: 0; width: 4.1rem; height: 2.25rem;
+            transform: translateX(-50%) rotate(-10deg);
+        }
+        .http-error-dome {
+            position: absolute; left: 1.25rem; top: 0; width: 1.65rem; height: 1.15rem;
+            border-radius: 1.2rem 1.2rem 0.35rem 0.35rem; background: #fff;
+            box-shadow: inset 0.42rem 0 0 #dfe6ff;
+        }
+        .http-error-ring {
+            position: absolute; left: 0; top: 0.72rem; width: 4.1rem; height: 1.05rem;
+            border-radius: 50%; background: #0d238a;
+            box-shadow: 0 0.38rem 0 -0.12rem #8396f5;
+        }
+        .http-error-ring::after {
+            content: ''; position: absolute; left: 0.78rem; top: 0.14rem; width: 2.55rem; height: 0.46rem;
+            border-radius: 50%; background: #fff;
+        }
+        .http-error-beam {
+            position: absolute; left: 50%; top: 1.65rem; width: 100%; height: calc(100% - 1.65rem);
+            transform: translateX(-50%);
+            clip-path: polygon(47% 0, 53% 0, 100% 100%, 0 100%);
+            background: linear-gradient(180deg, rgba(196,208,255,0.72), rgba(255,255,255,0.08));
+        }
+        .http-error-content {
+            position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center;
+            margin-top: 1.4rem;
+        }
+        .http-error-code {
+            margin: 0; color: #0c2383; font-size: clamp(3rem, 6vw, 4.4rem); line-height: 1;
+            font-weight: 800; letter-spacing: -0.045em;
+        }
+        .http-error-message {
+            max-width: 31rem; margin: 1.65rem 0 2.65rem; color: #0c2383;
+            font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.5; font-weight: 700;
+        }
+        .http-error-home {
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.55rem;
+            min-height: 2.85rem; padding: 0.7rem 1.45rem; border: 0; border-radius: 999px;
+            background: #384352; color: #fff; font-size: 0.9rem; font-weight: 700;
+            cursor: pointer; box-shadow: 0 0.55rem 1.4rem rgba(27,36,51,0.16); transition: transform 160ms, background 160ms;
+        }
+        .http-error-home:hover { background: #222c39; transform: translateY(-1px); }
+        .http-error-home:focus-visible { outline: 3px solid rgba(20,50,230,0.35); outline-offset: 4px; }
+        @media (max-width: 640px) {
+            .http-error-page { padding: 1.25rem; }
+            .http-error-scene { width: 92vw; height: 28rem; transform: translate(-50%, -58%); }
+            .http-error-message { margin: 1.25rem 0 2rem; }
+        }
+
         .btn-primary {
             display: inline-flex; align-items: center; gap: 0.5rem;
             padding: 0.5rem 1.25rem; border-radius: 980px;
@@ -766,6 +828,16 @@
                         </div>
                     </div>
                     <div class="card p-8 mt-6">
+                        <h3 class="text-sm font-bold mb-2">Modal API Failure Demo</h3>
+                        <p class="text-sm mb-4" style="color:#86868b">Simulate a failed submit. Each test restores the data, keeps the modal and form values open, and shows a red error toast.</p>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="showModalFailureDemo('create')" class="btn-secondary"><i class="ph ph-plus-circle"></i> Add</button>
+                            <button onclick="showModalFailureDemo('edit')" class="btn-secondary"><i class="ph ph-pencil-simple"></i> Edit</button>
+                            <button onclick="showModalFailureDemo('delete')" class="btn-secondary"><i class="ph ph-trash"></i> Delete</button>
+                            <button onclick="showModalFailureDemo('unpublish')" class="btn-secondary"><i class="ph ph-arrow-line-down"></i> Unpublish</button>
+                        </div>
+                    </div>
+                    <div class="card p-8 mt-6">
                         <h3 class="text-sm font-bold mb-2">Error State Demo</h3>
                         <p class="text-sm mb-4" style="color:#86868b">Preview the standard HTTP error screens shown when data cannot be loaded.</p>
                         <div class="flex flex-wrap gap-2">
@@ -791,8 +863,11 @@
     <!-- ============== MODAL CONTAINER ============== -->
     <div id="modal-root"></div>
 
+    <!-- ============== FULL-PAGE ERROR STATE ============== -->
+    <div id="error-state-root" hidden></div>
+
     <!-- ============== TOAST CONTAINER ============== -->
-    <div id="toast-root" class="fixed bottom-6 right-6 z-[100] space-y-2"></div>
+    <div id="toast-root" class="fixed bottom-6 right-6 z-[300] space-y-2"></div>
 
 <script src="js/seed-data.js"></script>
 <script src="js/store.js"></script>

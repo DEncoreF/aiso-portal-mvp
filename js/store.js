@@ -24,14 +24,16 @@ const Store = (function () {
         });
     }
 
-    function save() {
+    function save({ notify = true } = {}) {
         try {
             localStorage.setItem(KEY, serialize());
+            return true;
         } catch (e) {
             console.error('Store.save failed:', e);
-            if (typeof showToast === 'function') {
-                showToast('Update failed. Please contact the administrator.', 'error');
+            if (notify && typeof showToast === 'function') {
+                showToast('Unable to save changes. Please try again.', 'error');
             }
+            return false;
         }
     }
 
@@ -94,8 +96,17 @@ const Store = (function () {
     }
 
     function reset() {
-        try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
-        location.reload();
+        try {
+            localStorage.removeItem(KEY);
+            location.reload();
+            return true;
+        } catch (e) {
+            console.error('Store.reset failed:', e);
+            if (typeof showToast === 'function') {
+                showToast('Unable to reset demo data. Please try again.', 'error');
+            }
+            return false;
+        }
     }
 
     // Resize + re-encode an image File to a data URL small enough for localStorage.
