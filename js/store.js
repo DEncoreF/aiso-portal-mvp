@@ -55,14 +55,35 @@ const Store = (function () {
         if (Array.isArray(data.PRODUCTS)) {
             const seedMockProducts = PRODUCTS.filter(product => product.is_mock);
             if (data.mockDataVersion !== MOCK_DATA_VERSION) {
-                const persistedIds = new Set(data.PRODUCTS.map(product => product.id));
-                PRODUCTS = [...data.PRODUCTS, ...seedMockProducts.filter(product => !persistedIds.has(product.id))];
+                const seedProductsById = new Map(PRODUCTS.map(product => [product.id, product]));
+                const migratedProducts = data.PRODUCTS.map(product => {
+                    const seedProduct = seedProductsById.get(product.id);
+                    const seedCreatedEntry = seedProduct?.history?.find(entry => entry.action === 'Created');
+                    if (!seedCreatedEntry || product.history?.some(entry => entry.action === 'Created')) return product;
+                    return { ...product, history: [...(product.history || []), { ...seedCreatedEntry }] };
+                });
+                const persistedIds = new Set(migratedProducts.map(product => product.id));
+                PRODUCTS = [...migratedProducts, ...seedMockProducts.filter(product => !persistedIds.has(product.id))];
                 mockDataMigrated = true;
             } else {
                 PRODUCTS = data.PRODUCTS;
             }
         }
-        if (Array.isArray(data.ACTIVITY_LOG)) ACTIVITY_LOG = data.ACTIVITY_LOG;
+        if (Array.isArray(data.ACTIVITY_LOG)) {
+            if (data.mockDataVersion !== MOCK_DATA_VERSION) {
+                const createdProductNames = new Set(
+                    data.ACTIVITY_LOG
+                        .filter(log => log.action === 'Created')
+                        .map(log => log.productName)
+                );
+                ACTIVITY_LOG = [
+                    ...data.ACTIVITY_LOG,
+                    ...SEED_PRODUCT_CREATED_LOGS.filter(log => !createdProductNames.has(log.productName)),
+                ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            } else {
+                ACTIVITY_LOG = data.ACTIVITY_LOG;
+            }
+        }
         if (Array.isArray(data.HARDWARE_PRODUCT_TYPES)) HARDWARE_PRODUCT_TYPES = data.HARDWARE_PRODUCT_TYPES;
         if (Array.isArray(data.SOFTWARE_CATEGORY_OPTIONS)) SOFTWARE_CATEGORY_OPTIONS = data.SOFTWARE_CATEGORY_OPTIONS;
         if (Array.isArray(data.SOFTWARE_INDUSTRY_OPTIONS)) SOFTWARE_INDUSTRY_OPTIONS = data.SOFTWARE_INDUSTRY_OPTIONS;

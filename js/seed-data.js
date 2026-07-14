@@ -197,7 +197,7 @@ let PRODUCTS = [
 // Additional mock catalog entries keep both product lists above one page so
 // pagination, filtering, sorting, archived states, and history expansion can
 // be exercised without manually creating products.
-const MOCK_DATA_VERSION = 1;
+const MOCK_DATA_VERSION = 2;
 const MOCK_HARDWARE_PRODUCTS = [
     { name: 'EdgeCore AI MiniPC', model: 'EC-MP100', brand: 'EdgeCore', category: 'miniPC', status: 'published', aidaptiv: true, format: 'standard' },
     { name: 'VisionBox Edge AI', model: 'VB-AI200', brand: 'Aetina', category: 'AI Box', status: 'draft', aidaptiv: false, format: 'standard' },
@@ -277,8 +277,31 @@ const MOCK_SOFTWARE_PRODUCTS = [
 
 PRODUCTS.push(...MOCK_HARDWARE_PRODUCTS, ...MOCK_SOFTWARE_PRODUCTS);
 
-// Initialize history for all products
-PRODUCTS.forEach(p => { if (!p.history) p.history = []; });
+// Every seeded mock product starts with a Created record. Keep the entry as
+// the oldest history item so newer mock revisions remain first in the timeline.
+PRODUCTS.forEach(product => {
+    if (!product.history) product.history = [];
+    if (!product.history.some(entry => entry.action === 'Created')) {
+        product.history.push({
+            action: 'Created',
+            detail: 'New draft created',
+            timestamp: `${product.created_at}T09:00:00.000Z`,
+            user: 'System Root',
+        });
+    }
+});
+
+const SEED_PRODUCT_CREATED_LOGS = PRODUCTS
+    .map(product => ({
+        action: 'Created',
+        productName: product.name,
+        detail: 'New draft created',
+        timestamp: `${product.created_at}T09:00:00.000Z`,
+        user: 'System Root',
+        pid: product.id,
+        is_mock: true,
+    }))
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
 // ═══════════════════════════════════════════════════════════════════
 // NAV CONFIG — per role
@@ -356,4 +379,4 @@ const HTTP_ERROR_MESSAGES = {
 let createProductState = { type: null, hardwareImage: null, softwareIcon: null, softwareImages: [] };
 
 let sortState = { software: { key: null, dir: 'asc' }, hardware: { key: null, dir: 'asc' } };
-let ACTIVITY_LOG = [];
+let ACTIVITY_LOG = SEED_PRODUCT_CREATED_LOGS.map(log => ({ ...log }));
