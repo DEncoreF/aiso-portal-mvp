@@ -106,6 +106,231 @@ function showModal(html, wide = false) {
 
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 
+const PRODUCT_ICON_CROP_VIEWPORT = 320;
+const PRODUCT_ICON_OUTPUT_SIZE = 512;
+let productIconCropState = null;
+
+function closeProductIconCropper() {
+    const state = productIconCropState;
+    if (state?.objectUrl) URL.revokeObjectURL(state.objectUrl);
+    if (state?.inputId) {
+        const input = document.getElementById(state.inputId);
+        if (input) input.value = '';
+    }
+    productIconCropState = null;
+    const root = document.getElementById('product-icon-crop-root');
+    if (root) root.innerHTML = '';
+}
+
+function openProductIconCropper(file, context, inputId) {
+    closeProductIconCropper();
+    const root = document.getElementById('product-icon-crop-root');
+    if (!root) return;
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    productIconCropState = {
+        file,
+        context,
+        inputId,
+        objectUrl,
+        image,
+        baseScale: 1,
+        zoom: 1,
+        offsetX: 0,
+        offsetY: 0,
+        dragging: false,
+    };
+    root.innerHTML = `<div class="icon-crop-backdrop"><div class="icon-crop-dialog"><div class="icon-crop-loading"><i class="ph ph-spinner-gap" style="font-size:22px"></i><div style="margin-top:8px">Preparing image…</div></div></div></div>`;
+
+    image.onload = () => {
+        if (!productIconCropState || productIconCropState.objectUrl !== objectUrl) return;
+        productIconCropState.baseScale = Math.max(
+            PRODUCT_ICON_CROP_VIEWPORT / image.naturalWidth,
+            PRODUCT_ICON_CROP_VIEWPORT / image.naturalHeight,
+        );
+        renderProductIconCropper();
+    };
+    image.onerror = () => {
+        if (!productIconCropState || productIconCropState.objectUrl !== objectUrl) return;
+        closeProductIconCropper();
+        setProductImageValidationError(inputId, {
+            valid: false,
+            code: 'format',
+            message: PRODUCT_IMAGE_VALIDATION_MESSAGES.file,
+            file,
+        });
+    };
+    image.src = objectUrl;
+}
+
+function getProductIconCropMetrics() {
+    const state = productIconCropState;
+    if (!state) return null;
+    const width = state.image.naturalWidth * state.baseScale * state.zoom;
+    const height = state.image.naturalHeight * state.baseScale * state.zoom;
+    return {
+        width,
+        height,
+        x: (PRODUCT_ICON_CROP_VIEWPORT - width) / 2 + state.offsetX,
+        y: (PRODUCT_ICON_CROP_VIEWPORT - height) / 2 + state.offsetY,
+    };
+}
+
+function clampProductIconCropOffset() {
+    const state = productIconCropState;
+    const metrics = getProductIconCropMetrics();
+    if (!state || !metrics) return;
+    const maxX = Math.max(0, (metrics.width - PRODUCT_ICON_CROP_VIEWPORT) / 2);
+    const maxY = Math.max(0, (metrics.height - PRODUCT_ICON_CROP_VIEWPORT) / 2);
+    state.offsetX = Math.max(-maxX, Math.min(maxX, state.offsetX));
+    state.offsetY = Math.max(-maxY, Math.min(maxY, state.offsetY));
+}
+
+function drawProductIconCropPreview() {
+    const canvas = document.getElementById('product-icon-crop-canvas');
+    const state = productIconCropState;
+    if (!canvas || !state) return;
+    clampProductIconCropOffset();
+    const metrics = getProductIconCropMetrics();
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(state.image, metrics.x, metrics.y, metrics.width, metrics.height);
+}
+
+function setProductIconCropZoom(value) {
+    if (!productIconCropState) return;
+    productIconCropState.zoom = Math.max(1, Math.min(3, Number(value) || 1));
+    clampProductIconCropOffset();
+    drawProductIconCropPreview();
+}
+
+function resetProductIconCrop() {
+    if (!productIconCropState) return;
+    productIconCropState.zoom = 1;
+    productIconCropState.offsetX = 0;
+    productIconCropState.offsetY = 0;
+    const zoom = document.getElementById('product-icon-crop-zoom');
+    if (zoom) zoom.value = '1';
+    drawProductIconCropPreview();
+}
+
+function renderProductIconCropper() {
+    const state = productIconCropState;
+    const root = document.getElementById('product-icon-crop-root');
+    if (!state || !root) return;
+    root.innerHTML = `
+        <div class="icon-crop-backdrop" onclick="if(event.target===this)closeProductIconCropper()">
+            <div class="icon-crop-dialog" role="dialog" aria-modal="true" aria-labelledby="product-icon-crop-title">
+                <div class="icon-crop-header">
+                    <div>
+                        <div id="product-icon-crop-title" class="icon-crop-title">Crop Product Icon</div>
+                        <div class="icon-crop-subtitle">Move and zoom the image to fit the square area.</div>
+                    </div>
+                    <button type="button" class="icon-crop-close" aria-label="Close cropper" onclick="closeProductIconCropper()"><i class="ph ph-x"></i></button>
+                </div>
+                <div class="icon-crop-body">
+                    <div class="icon-crop-viewport">
+                        <canvas id="product-icon-crop-canvas" width="${PRODUCT_ICON_CROP_VIEWPORT}" height="${PRODUCT_ICON_CROP_VIEWPORT}" aria-label="Product icon crop area"></canvas>
+                    </div>
+                    <div class="icon-crop-zoom">
+                        <i class="ph ph-minus" aria-hidden="true"></i>
+                        <input id="product-icon-crop-zoom" type="range" min="1" max="3" step="0.01" value="${state.zoom}" aria-label="Zoom image" oninput="setProductIconCropZoom(this.value)">
+                        <i class="ph ph-plus" aria-hidden="true"></i>
+                    </div>
+                    <div class="icon-crop-hint"><i class="ph ph-hand-grabbing"></i> Drag to reposition · Output ${PRODUCT_ICON_OUTPUT_SIZE} × ${PRODUCT_ICON_OUTPUT_SIZE}px</div>
+                </div>
+                <div class="icon-crop-actions">
+                    <button type="button" class="btn-ghost" onclick="resetProductIconCrop()">Reset</button>
+                    <button type="button" class="btn-secondary" onclick="closeProductIconCropper()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="applyProductIconCrop()">Apply Crop</button>
+                </div>
+            </div>
+        </div>`;
+
+    const canvas = document.getElementById('product-icon-crop-canvas');
+    if (!canvas) return;
+    canvas.addEventListener('pointerdown', event => {
+        if (!productIconCropState) return;
+        productIconCropState.dragging = true;
+        productIconCropState.pointerId = event.pointerId;
+        productIconCropState.pointerX = event.clientX;
+        productIconCropState.pointerY = event.clientY;
+        canvas.setPointerCapture(event.pointerId);
+        canvas.classList.add('is-dragging');
+    });
+    canvas.addEventListener('pointermove', event => {
+        const activeState = productIconCropState;
+        if (!activeState?.dragging || activeState.pointerId !== event.pointerId) return;
+        const rect = canvas.getBoundingClientRect();
+        const scale = PRODUCT_ICON_CROP_VIEWPORT / rect.width;
+        activeState.offsetX += (event.clientX - activeState.pointerX) * scale;
+        activeState.offsetY += (event.clientY - activeState.pointerY) * scale;
+        activeState.pointerX = event.clientX;
+        activeState.pointerY = event.clientY;
+        drawProductIconCropPreview();
+    });
+    const stopDragging = event => {
+        const activeState = productIconCropState;
+        if (!activeState || activeState.pointerId !== event.pointerId) return;
+        activeState.dragging = false;
+        canvas.classList.remove('is-dragging');
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    };
+    canvas.addEventListener('pointerup', stopDragging);
+    canvas.addEventListener('pointercancel', stopDragging);
+    drawProductIconCropPreview();
+    document.querySelector('.icon-crop-close')?.focus();
+}
+
+function applyProductIconCrop() {
+    const state = productIconCropState;
+    if (!state) return;
+    clampProductIconCropOffset();
+    const metrics = getProductIconCropMetrics();
+    const output = document.createElement('canvas');
+    output.width = PRODUCT_ICON_OUTPUT_SIZE;
+    output.height = PRODUCT_ICON_OUTPUT_SIZE;
+    const ctx = output.getContext('2d');
+    const mimeType = state.file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+    if (mimeType === 'image/jpeg') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, output.width, output.height);
+    }
+    const outputScale = PRODUCT_ICON_OUTPUT_SIZE / PRODUCT_ICON_CROP_VIEWPORT;
+    ctx.drawImage(
+        state.image,
+        metrics.x * outputScale,
+        metrics.y * outputScale,
+        metrics.width * outputScale,
+        metrics.height * outputScale,
+    );
+    const dataUrl = output.toDataURL(mimeType, 0.9);
+    const icon = {
+        file: state.file,
+        name: state.file.name,
+        url: dataUrl,
+        dataUrl,
+        width: PRODUCT_ICON_OUTPUT_SIZE,
+        height: PRODUCT_ICON_OUTPUT_SIZE,
+        isCropped: true,
+    };
+    const context = state.context;
+    const inputId = state.inputId;
+    closeProductIconCropper();
+    setCreateError(inputId, '');
+    if (context === 'edit') {
+        icon.dataPromise = Promise.resolve(dataUrl);
+        editSwIcon = icon;
+        renderEditSwIconStatus();
+        renderEditPreview('software');
+    } else {
+        createProductState.softwareIcon = icon;
+        renderIconStatus();
+        renderCreateProductPreview('software');
+    }
+}
+
 // ── Shared empty state ──
 // Centered icon + gray message (+ optional CTA/extra HTML). Every list routes
 // its empty state through here so they look and read the same across the app.
@@ -1418,11 +1643,7 @@ function handleSoftwareIconUpload(input) {
         renderCreateProductPreview('software');
         return;
     }
-    createProductState.softwareIcon = { file, name: file.name, url: URL.createObjectURL(file) };
-    const swIconObj = createProductState.softwareIcon;
-    Store.compressImage(file).then(d => { swIconObj.dataUrl = d; }).catch(() => {});
-    renderIconStatus();
-    renderCreateProductPreview('software');
+    openProductIconCropper(file, 'create', 'new-p-icon');
 }
 
 function removeSoftwareIcon() {
@@ -2040,7 +2261,7 @@ function showCreateProductModal(type) {
             <label class="file-upload-wrap">
                 <input id="new-p-icon" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleSoftwareIconUpload(this)">
                 <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
-                <span class="file-upload-text">Square icon · Max 5MB · JPG / JPEG / PNG</span>
+                <span class="file-upload-text">Square crop · Max 5MB · JPG / JPEG / PNG</span>
             </label>
             <div id="new-p-icon-error" class="field-error-text"></div>
             <div id="software-icon-status" class="mt-2"></div>
@@ -2272,7 +2493,7 @@ function showEditProductModal(pid, source) {
                 <label class="file-upload-wrap">
                     <input id="edit-p-icon" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onchange="handleEditSwIconUpload(this)">
                     <span class="file-upload-btn"><i class="ph ph-upload-simple"></i> Choose File</span>
-                    <span class="file-upload-text">Square icon · Max 5MB · JPG / JPEG / PNG</span>
+                    <span class="file-upload-text">Square crop · Max 5MB · JPG / JPEG / PNG</span>
                 </label>
                 <div id="edit-p-icon-error" class="field-error-text"></div>
             </div>
@@ -2671,11 +2892,7 @@ function handleEditSwIconUpload(input) {
         setProductImageValidationError('edit-p-icon', validation);
         input.value = ''; return;
     }
-    editSwIcon = { file, name: file.name, url: URL.createObjectURL(file) };
-    const editIconObj = editSwIcon;
-    editIconObj.dataPromise = Store.compressImage(file).then(d => { editIconObj.dataUrl = d; }).catch(() => {});
-    renderEditPreview('software');
-    renderEditSwIconStatus();
+    openProductIconCropper(file, 'edit', 'edit-p-icon');
 }
 
 function handleEditHwImageUpload(input) {
@@ -3344,7 +3561,8 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
-        if (document.getElementById('user-menu-dropdown')?.style.display === 'block') closeUserMenu();
+        if (document.getElementById('product-icon-crop-root')?.innerHTML) closeProductIconCropper();
+        else if (document.getElementById('user-menu-dropdown')?.style.display === 'block') closeUserMenu();
         else if (sdBackdrop?.classList.contains('is-open')) closeSwPreview();
         else if (document.getElementById('modal-root').innerHTML) closeModal();
     }
