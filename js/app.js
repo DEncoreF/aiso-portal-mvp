@@ -485,7 +485,6 @@ function productActionBtns(p) {
     } else {
         btns += `<button onclick="togglePublish('${p.id}')" class="btn-ghost" style="color:#059669" title="Publish"><i class="ph ph-arrow-line-up"></i></button>`;
         btns += `<button onclick="archiveProduct('${p.id}')" class="btn-ghost" style="color:#7c3aed" title="Archive"><i class="ph ph-archive"></i></button>`;
-        btns += `<button onclick="confirmDeleteProduct('${p.id}')" class="btn-ghost" style="color:#dc2626" title="Delete"><i class="ph ph-trash"></i></button>`;
     }
     return btns;
 }
@@ -626,15 +625,19 @@ function restoreProduct(pid) {
     reRenderCurrentList();
 }
 
-// ── Delete (permanent) ──
+// ── Delete (Archived only, permanent) ──
 function confirmDeleteProduct(pid) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
+    if (p.status !== 'archived') {
+        showToast('Archive this product before permanently deleting it.', 'error');
+        return;
+    }
     showModal(`
         <div style="text-align:center;padding:1rem 0">
             <div style="width:56px;height:56px;border-radius:16px;background:#fef2f2;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ph ph-trash" style="font-size:28px;color:#dc2626"></i></div>
             <h3 style="font-size:1.1rem;font-weight:700;margin:0 0 8px">Permanently delete "${esc(p.name)}"?</h3>
-            <p style="font-size:13px;color:#86868b;margin:0 0 16px;line-height:1.6">This action cannot be undone. Type the product name to confirm.</p>
+            <p style="font-size:13px;color:#86868b;margin:0 0 16px;line-height:1.6">This archived product will be permanently removed and cannot be recovered. Type the product name to confirm.</p>
             <input id="delete-confirm-input" type="text" class="input-field" style="max-width:320px;margin:0 auto 20px;text-align:center" placeholder="${esc(p.name)}">
             <div style="display:flex;gap:10px;justify-content:center">
                 <button onclick="closeModal()" class="btn-secondary">Cancel</button>
@@ -646,6 +649,15 @@ function confirmDeleteProduct(pid) {
 function doDeleteProduct(pid, force = false) {
     const p = PRODUCTS.find(x => x.id === pid);
     if (!p) return;
+    const detailView = document.getElementById(`view-${p.product_type === 'software' ? 'sw' : 'hw'}-detail`);
+    const returnToList = detailView && !detailView.classList.contains('hidden')
+        ? (p.product_type === 'software' ? 'sw-products' : 'hw-products')
+        : '';
+    if (p.status !== 'archived') {
+        closeModal();
+        showToast('Archive this product before permanently deleting it.', 'error');
+        return;
+    }
     if (!force) {
         const confirmVal = (document.getElementById('delete-confirm-input')?.value || '').trim();
         if (confirmVal !== p.name) { showToast('Product name does not match', 'error'); return; }
@@ -662,7 +674,8 @@ function doDeleteProduct(pid, force = false) {
     if (!saved) return;
     closeModal();
     showToast(`${name} has been permanently deleted.`, 'success');
-    reRenderCurrentList();
+    if (returnToList) navigate(returnToList);
+    else reRenderCurrentList();
 }
 
 function reRenderCurrentList() {
@@ -853,6 +866,7 @@ function showSwDetail(pid) {
                 ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showSwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
                 ${canEdit && p.status !== 'archived' ? `<button onclick="archiveProduct('${p.id}');navigate('sw-products')" class="btn-secondary" style="color:#7c3aed"><i class="ph ph-archive"></i> Archive</button>` : ''}
                 ${canEdit && p.status === 'archived' ? `<button onclick="restoreProduct('${p.id}');showSwDetail('${p.id}')" class="btn-primary" style="background:#059669"><i class="ph ph-arrow-counter-clockwise"></i> Restore</button>` : ''}
+                ${canEdit && p.status === 'archived' ? `<button onclick="confirmDeleteProduct('${p.id}')" class="btn-secondary" style="color:#dc2626"><i class="ph ph-trash"></i> Delete</button>` : ''}
             </div>
         </div>
 
@@ -933,6 +947,7 @@ function showHwDetail(pid) {
                 ${canEdit && p.status !== 'published' && p.status !== 'archived' ? `<button onclick="togglePublish('${p.id}');showHwDetail('${p.id}')" class="btn-primary"><i class="ph ph-arrow-up"></i> Publish</button>` : ''}
                 ${canEdit && p.status !== 'archived' ? `<button onclick="archiveProduct('${p.id}');navigate('hw-products')" class="btn-secondary" style="color:#7c3aed"><i class="ph ph-archive"></i> Archive</button>` : ''}
                 ${canEdit && p.status === 'archived' ? `<button onclick="restoreProduct('${p.id}');showHwDetail('${p.id}')" class="btn-primary" style="background:#059669"><i class="ph ph-arrow-counter-clockwise"></i> Restore</button>` : ''}
+                ${canEdit && p.status === 'archived' ? `<button onclick="confirmDeleteProduct('${p.id}')" class="btn-secondary" style="color:#dc2626"><i class="ph ph-trash"></i> Delete</button>` : ''}
             </div>
         </div>
 
@@ -2799,7 +2814,7 @@ const MODAL_FAILURE_DEMOS = Object.freeze({
     },
     delete: {
         title: 'Delete product',
-        description: 'Submit the deletion request. The simulated API will fail and the product will remain available.',
+        description: 'Submit the deletion request for an archived product. The simulated API will fail and the product will remain available.',
         submitLabel: 'Delete Product',
         icon: 'ph-trash',
         destructive: true,
@@ -2817,7 +2832,9 @@ function showModalFailureDemo(action) {
     if (!config) return;
     const product = action === 'unpublish'
         ? PRODUCTS.find(item => item.status === 'published')
-        : PRODUCTS[0];
+        : action === 'delete'
+            ? PRODUCTS.find(item => item.status === 'archived')
+            : PRODUCTS[0];
     const productId = product?.id || '';
     const fieldLabel = action === 'delete' ? 'Type the product name to confirm' : 'Product Name';
     const fieldValue = action === 'create' ? 'API Failure Test Product' : (product?.name || 'Sample Product');
@@ -2863,7 +2880,7 @@ function submitModalFailureDemo(action, pid) {
             PRODUCTS.push({ id: `failure-demo-${Date.now()}`, name: value, product_type: 'software', status: 'draft' });
         } else if (action === 'edit' && product) {
             product.name = value;
-        } else if (action === 'delete' && product) {
+        } else if (action === 'delete' && product?.status === 'archived') {
             PRODUCTS.splice(PRODUCTS.indexOf(product), 1);
         } else if (action === 'unpublish' && product) {
             product.status = 'draft';
