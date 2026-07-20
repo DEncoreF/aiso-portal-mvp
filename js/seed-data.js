@@ -2,7 +2,14 @@
 // DATA
 // ═══════════════════════════════════════════════════════════════════
 
-const SUPER_ADMIN_USER = { role: 'SUPER_ADMIN', name: 'System Root', email: 'root@aiso.com', label: 'Super Admin', avatar: 'SA' };
+const SUPER_ADMIN_USER = {
+    role: 'SUPER_ADMIN',
+    name: 'System Root',
+    email: 'root@aiso.com',
+    label: 'Super Admin',
+    avatar: 'SA',
+    permissions: ['*'],
+};
 const DEMO_LOGIN = { email: 'root@aiso.com', password: 'aiso1234' };
 
 const ORGS = [
@@ -93,6 +100,7 @@ let PRODUCTS = [
         status: 'published', created_at: '2025-11-20', updated_at: '2026-03-12',
         tagline: 'AI Governance Platform for Enhanced Security and Cost Observability',
         sw_category: 'included',
+        license_offer: 'Free during POC',
         features: [
             'Centralizes management of AI models and LLMs; monitors API usage',
             'Improves system performance with microservices architecture',
@@ -110,6 +118,7 @@ let PRODUCTS = [
         status: 'published', created_at: '2025-10-15', updated_at: '2026-03-10',
         tagline: 'Enterprise Generative AI Application Platform',
         sw_category: 'included',
+        license_offer: '30-day free trial',
         features: [
             'Enterprise-Grade Knowledge Integration & Governance',
             'Multi-Role AI Assistants for Diverse Business Scenarios',
@@ -127,6 +136,7 @@ let PRODUCTS = [
         status: 'draft', created_at: '2026-02-10', updated_at: '2026-03-19',
         tagline: 'Agile AI Knowledge & Assistant Platform',
         sw_category: 'optional',
+        license_offer: 'Other - see appendix',
         compatible_hardware: ['hw1', 'hw2'],
         features: [
             'Agile knowledge management with rapid, zero-configuration deployment.',
@@ -310,6 +320,7 @@ const SEED_PRODUCT_CREATED_LOGS = PRODUCTS
 const NAV_ITEMS = [
     { key: 'sw-products', icon: 'ph-app-window', label: 'Software Products' },
     { key: 'hw-products', icon: 'ph-hard-drives', label: 'Hardware Products' },
+    { key: 'compatibility', icon: 'ph-arrows-left-right', label: 'Compatibility', permission: 'compatibility.read' },
     { key: 'param-center', icon: 'ph-sliders', label: 'Parameter Center' },
     { key: 'activity-log', icon: 'ph-clock-counter-clockwise', label: 'Activity Log' },
     { key: 'settings', icon: 'ph-gear', label: 'Settings' },
@@ -348,6 +359,16 @@ let SOFTWARE_INDUSTRY_OPTIONS = [
     { label: 'Information Technology', is_active: true },
     { label: 'Manufacturing', is_active: true },
     { label: 'Government & Public Sector', is_active: true },
+];
+// Licensing offers for software sold with an all-in-one appliance, per the
+// alliance agreement clause. Single-select; labels and badge colors are
+// Parameter Center-managed. `color` is a LICENSE_BADGE_COLORS palette key.
+let SOFTWARE_LICENSE_OPTIONS = [
+    { label: 'Free during POC', is_active: true, color: 'green' },
+    { label: '30-day free trial', is_active: true, color: 'green' },
+    { label: '90-day free trial', is_active: true, color: 'green' },
+    { label: 'First year free', is_active: true, color: 'green' },
+    { label: 'Other - see appendix', is_active: true, color: 'green' },
 ];
 const HW_KEY_SPEC_MAX_ITEMS = 8;
 const HW_KEY_SPEC_MIN_ITEMS = 3;

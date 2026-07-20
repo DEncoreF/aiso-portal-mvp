@@ -2,11 +2,13 @@
 // STORE — localStorage persistence layer
 // Load order: seed-data.js → store.js → app.js
 // Persisted state: PRODUCTS, ACTIVITY_LOG, HARDWARE_PRODUCT_TYPES,
-//                  SOFTWARE_CATEGORY_OPTIONS, SOFTWARE_INDUSTRY_OPTIONS
+//                  SOFTWARE_CATEGORY_OPTIONS, SOFTWARE_INDUSTRY_OPTIONS,
+//                  SOFTWARE_LICENSE_OPTIONS
 // ═══════════════════════════════════════════════════════════════════
 
 const Store = (function () {
-    const KEY = 'aiso-portal-v2-mvp';
+    // v3 uses a separate key so it never reads or overwrites v2 prototype data.
+    const KEY = 'aiso-portal-v3-mvp';
     const VERSION = 1;
     const IMG_MAX_WIDTH = 800;
     const IMG_JPEG_QUALITY = 0.8;
@@ -21,6 +23,7 @@ const Store = (function () {
             HARDWARE_PRODUCT_TYPES,
             SOFTWARE_CATEGORY_OPTIONS,
             SOFTWARE_INDUSTRY_OPTIONS,
+            SOFTWARE_LICENSE_OPTIONS,
         });
     }
 
@@ -89,6 +92,7 @@ const Store = (function () {
         if (Array.isArray(data.HARDWARE_PRODUCT_TYPES)) HARDWARE_PRODUCT_TYPES = data.HARDWARE_PRODUCT_TYPES;
         if (Array.isArray(data.SOFTWARE_CATEGORY_OPTIONS)) SOFTWARE_CATEGORY_OPTIONS = data.SOFTWARE_CATEGORY_OPTIONS;
         if (Array.isArray(data.SOFTWARE_INDUSTRY_OPTIONS)) SOFTWARE_INDUSTRY_OPTIONS = data.SOFTWARE_INDUSTRY_OPTIONS;
+        if (Array.isArray(data.SOFTWARE_LICENSE_OPTIONS)) SOFTWARE_LICENSE_OPTIONS = data.SOFTWARE_LICENSE_OPTIONS;
         if (mockDataMigrated) {
             try { localStorage.setItem(KEY, serialize()); } catch (e) { /* retry on the next normal save */ }
         }

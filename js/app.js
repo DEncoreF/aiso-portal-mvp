@@ -27,6 +27,7 @@ function capturePortalState() {
         HARDWARE_PRODUCT_TYPES,
         SOFTWARE_CATEGORY_OPTIONS,
         SOFTWARE_INDUSTRY_OPTIONS,
+        SOFTWARE_LICENSE_OPTIONS,
     }));
 }
 
@@ -36,6 +37,7 @@ function restorePortalState(snapshot) {
     HARDWARE_PRODUCT_TYPES = snapshot.HARDWARE_PRODUCT_TYPES;
     SOFTWARE_CATEGORY_OPTIONS = snapshot.SOFTWARE_CATEGORY_OPTIONS;
     SOFTWARE_INDUSTRY_OPTIONS = snapshot.SOFTWARE_INDUSTRY_OPTIONS;
+    SOFTWARE_LICENSE_OPTIONS = snapshot.SOFTWARE_LICENSE_OPTIONS;
 }
 
 // Treat each UI mutation like an API transaction. If persistence fails, roll the
@@ -68,7 +70,22 @@ function commitPortalMutation(
     return false;
 }
 
-function canManageProduct(p) { return true; /* Super Admin has full access */ }
+const PORTAL_PERMISSIONS = Object.freeze({
+    COMPATIBILITY_READ: 'compatibility.read',
+    COMPATIBILITY_UPDATE: 'compatibility.update',
+    COMPATIBILITY_AUDIT_READ: 'compatibility.audit.read',
+});
+
+// Central permission boundary for future RBAC/API wiring. The v3 demo user has
+// wildcard access; future roles can provide an explicit permissions array.
+function hasPermission(permission) {
+    const permissions = currentUser?.permissions || [];
+    return currentUser?.role === 'SUPER_ADMIN' || permissions.includes('*') || permissions.includes(permission);
+}
+
+function canViewCompatibility() { return hasPermission(PORTAL_PERMISSIONS.COMPATIBILITY_READ); }
+function canManageCompatibility() { return hasPermission(PORTAL_PERMISSIONS.COMPATIBILITY_UPDATE); }
+function canManageProduct(p) { return true; /* Existing product permissions remain unchanged in this prototype. */ }
 function getSwCategories(p) { return p.categories?.length ? p.categories : (p.sub_category ? [p.sub_category] : []); }
 function findCompatRefs(hwId) { return PRODUCTS.filter(p => p.product_type === 'software' && p.status !== 'archived' && (p.compatible_hardware || []).includes(hwId)); }
 function getVisibleProducts(type) { return PRODUCTS.filter(p => p.product_type === type && p.status !== 'archived'); }
@@ -506,7 +523,7 @@ function enterApp() {
 
     // Build nav
     const navEl = document.getElementById('dynamic-nav');
-    navEl.innerHTML = NAV_ITEMS.map(n => `
+    navEl.innerHTML = NAV_ITEMS.filter(n => !n.permission || hasPermission(n.permission)).map(n => `
         <button class="nav-item" data-nav="${n.key}" onclick="navigate('${n.key}')">
             <span class="nav-icon"><i class="ph ${n.icon}"></i></span>
             <span>${esc(n.label)}</span>
@@ -547,6 +564,10 @@ function setPageHeader(title, subtitle, actionHtml) {
 }
 
 function navigate(key) {
+    if (key === 'compatibility' && !canViewCompatibility()) {
+        showToast('You do not have permission to view compatibility mappings.', 'error');
+        return;
+    }
     currentView = key;
     // Toggle views
     document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
@@ -562,6 +583,7 @@ function navigate(key) {
     const meta = {
         'sw-products': { title: 'Software Products', action: `<button onclick="showCreateProductModal('software')" class="btn-primary" id="sw-create-btn"><i class="ph ph-plus"></i> Add Software</button>` },
         'hw-products': { title: 'Hardware Products', action: `<button onclick="showCreateProductModal('hardware')" class="btn-primary" id="hw-create-btn"><i class="ph ph-plus"></i> Add Hardware</button>` },
+        'compatibility': { title: 'Compatibility Mapping', subtitle: 'Manage which published hardware products can be paired with each published software product. Changes take effect immediately.' },
         'param-center': { title: 'Parameter Center', subtitle: 'System-level parameters managed exclusively by Super Admin.' },
         'activity-log': { title: 'Activity Log', subtitle: 'Recent actions performed in this session.', action: `<button onclick="ACTIVITY_LOG=[];Store.save();renderActivityLog();showToast('Log cleared')" class="btn-secondary"><i class="ph ph-trash"></i> Clear</button>` },
         'settings': { title: 'Settings' },
@@ -571,6 +593,7 @@ function navigate(key) {
     // Render
     if (key === 'sw-products') renderSwProducts();
     else if (key === 'hw-products') renderHwProducts();
+    else if (key === 'compatibility') renderCompatibilityCenter();
     else if (key === 'param-center') renderParamCenter();
     else if (key === 'activity-log') renderActivityLog();
     else if (key === 'settings') renderSettings();
@@ -1296,9 +1319,10 @@ function showSwPreview(pid) {
             <div class="sd-hero">
                 <div class="sd-hero-header">
                     <div class="sd-mark">${p.icon_data ? `<img src="${p.icon_data}" alt="${esc(p.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:20px">` : esc(initials)}</div>
-                    <div>
+                    <div style="min-width:0;flex:1">
                         <p class="sd-company">${esc(p.vendor_name)}</p>
                         <h2 class="sd-name">${esc(p.name)}</h2>
+                        ${renderSwLicenseBadge(p.license_offer)}
                     </div>
                 </div>
                 <p class="sd-tagline">${esc(p.tagline || getSwCategories(p).join(', '))}</p>
@@ -1510,6 +1534,59 @@ function updateSwCategoryLimit(containerId) {
     boxes.forEach(b => { b.disabled = !b.checked && checked >= SW_CATEGORY_MAX; });
     const counter = document.getElementById(`${containerId}-count`);
     if (counter) counter.textContent = `${checked}/${SW_CATEGORY_MAX} selected`;
+}
+
+const SW_LICENSE_NONE = '';
+
+// Preset badge palette for licensing offers. Options store the `key`; the
+// Parameter Center lets Super Admin pick per label, storefront badges follow.
+const LICENSE_BADGE_COLORS = [
+    { key: 'green', name: 'Green', bg: '#ecfdf5', text: '#047857' },
+    { key: 'blue', name: 'Blue', bg: 'rgba(29,46,123,0.08)', text: '#1d2e7b' },
+    { key: 'sky', name: 'Sky', bg: '#eff6ff', text: '#1d4ed8' },
+    { key: 'purple', name: 'Purple', bg: '#f5f3ff', text: '#6d28d9' },
+    { key: 'amber', name: 'Amber', bg: '#fffbeb', text: '#b45309' },
+    { key: 'rose', name: 'Rose', bg: '#fff1f2', text: '#be123c' },
+    { key: 'zinc', name: 'Gray', bg: '#f5f5f7', text: '#52525b' },
+];
+const LICENSE_BADGE_DEFAULT_COLOR = 'green';
+
+// Falls back to the default (green) for legacy options saved without a color.
+function getLicenseBadgeColor(key) {
+    return LICENSE_BADGE_COLORS.find(c => c.key === key)
+        || LICENSE_BADGE_COLORS.find(c => c.key === LICENSE_BADGE_DEFAULT_COLOR);
+}
+
+function getLicenseOptionColor(label) {
+    return getLicenseBadgeColor(SOFTWARE_LICENSE_OPTIONS.find(o => o.label === label)?.color);
+}
+
+function renderSwLicenseRadios(containerId, selected = '') {
+    const labels = SOFTWARE_LICENSE_OPTIONS.filter(o => o.is_active).map(o => o.label);
+    // Keep an already-assigned offer visible even if it was later disabled or
+    // deleted in the Parameter Center, so editing a product never drops it.
+    if (selected && !labels.includes(selected)) labels.push(selected);
+    const radio = (value, text, checked, withDot = false) => {
+        const dot = withDot
+            ? `<span style="width:8px;height:8px;border-radius:50%;background:${getLicenseOptionColor(value).text};margin-right:6px;flex-shrink:0"></span>`
+            : '';
+        return `<label class="preview-pill cursor-pointer"><input type="radio" name="${containerId}" value="${esc(value)}" class="mr-2 accent-aiso" ${checked ? 'checked' : ''}>${dot}${esc(text)}</label>`;
+    };
+    return `<div id="${containerId}" class="flex flex-wrap gap-2">
+        ${radio(SW_LICENSE_NONE, 'Not specified', !selected)}
+        ${labels.map(l => radio(l, l, l === selected, true)).join('')}
+    </div>
+    <div id="${containerId}-error" class="field-error-text"></div>`;
+}
+
+function getSelectedLicense(containerId) {
+    return document.querySelector(`#${containerId} input[type="radio"]:checked`)?.value || '';
+}
+
+function renderSwLicenseBadge(offer) {
+    if (!offer) return '';
+    const color = getLicenseOptionColor(offer);
+    return `<span class="sd-license-badge" style="background:${color.bg};color:${color.text}">${esc(offer)}</span>`;
 }
 
 function updateCharCounter(inputId) {
@@ -2027,6 +2104,7 @@ function renderSoftwareCreatePreview() {
                     <div style="min-width:0;flex:1">
                         <p class="sd-company">${vendor ? esc(vendor) : `<span style="${PLACEHOLDER_STYLE}">Company Name</span>`}</p>
                         <h2 class="sd-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name ? esc(name) : `<span style="${PLACEHOLDER_STYLE};font-weight:500">Product Name</span>`}</h2>
+                        ${renderSwLicenseBadge(getSelectedLicense('new-p-license'))}
                     </div>
                 </div>
                 <p class="sd-tagline">${pitch ? esc(pitch) : `<span style="${PLACEHOLDER_STYLE}">Short product description...</span>`}</p>
@@ -2153,8 +2231,6 @@ function showCreateProductModal(type) {
         .filter(item => item.is_active)
         .map(item => `<option value="${esc(item.label)}">${esc(item.label)}</option>`)
         .join('');
-    const allHW = PRODUCTS.filter(p => p.product_type === 'hardware' && p.status === 'published');
-
     const hardwareFields = `
         ${createFormSection('ph-layout', 'Product Format', 'Choose the storefront display format. This cannot be changed after creation.', `
             <div class="format-selector" id="hw-format-selector">
@@ -2286,6 +2362,10 @@ function showCreateProductModal(type) {
                 ${SOFTWARE_INDUSTRY_OPTIONS.filter(o => o.is_active).map(o => `<label class="preview-pill cursor-pointer"><input type="checkbox" value="${esc(o.label)}" class="mr-2 accent-aiso">${esc(o.label)}</label>`).join('')}
             </div>
         </div>`)}
+        ${createFormSection('ph-certificate', 'Licensing', 'Licensing offer shown as a badge next to the product name.', `
+            <div class="field-label mb-3">Licensing Options</div>
+            ${renderSwLicenseRadios('new-p-license')}
+        `)}
         ${createFormSection('ph-images', 'Product Images', 'Upload up to five images for the storefront preview.', `
             <label class="field-label">Product Images</label>
             <label class="file-upload-wrap">
@@ -2295,18 +2375,6 @@ function showCreateProductModal(type) {
             </label>
             <div id="new-p-images-error" class="field-error-text"></div>
             <div id="software-image-status" class="mt-2"></div>
-        `)}
-        ${createFormSection('ph-hard-drives', 'Compatibility', 'Select hardware products that can pair with this software.', `
-            <div class="field-label mb-3">Compatible Hardware</div>
-            <div id="new-p-compatible-hw" class="space-y-2">
-                ${allHW.map(h => `<label class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[#1d1d1f] cursor-pointer hover:bg-[#f5f5f7] transition">
-                    <input type="checkbox" value="${esc(h.id)}" class="w-4 h-4 accent-aiso">
-                    <i class="ph ph-hard-drives text-aiso"></i>
-                    <span class="font-semibold text-[#1d1d1f]">${esc(h.name)}</span>
-                    <span class="ml-auto text-xs text-[#86868b]">${esc(h.model || h.sub_category || '')}</span>
-                </label>`).join('')}
-                ${!allHW.length ? '<div class="text-xs text-[#86868b] italic">No published hardware products available</div>' : ''}
-            </div>
         `)}`;
 
     showModal(`
@@ -2373,8 +2441,10 @@ function createProduct(type) {
         newP.tagline = valueOf('new-p-pitch');
         newP.sw_category = 'optional';
         newP.features = collectSoftwareFeatures();
+        newP.license_offer = getSelectedLicense('new-p-license');
         newP.industries = getCheckedValues('new-p-industries');
-        newP.compatible_hardware = getCheckedValues('new-p-compatible-hw');
+        // Compatibility is maintained independently in Parameter Center.
+        newP.compatible_hardware = [];
         newP.photos = createProductState.softwareImages.map(img => img.name);
         newP.image_name = createProductState.softwareImages[0]?.name || '';
         newP.icon_name = createProductState.softwareIcon?.name || '';
@@ -2428,12 +2498,6 @@ function showEditProductModal(pid, source) {
     editSwIcon = p.icon_data ? { name: p.icon_name || 'Product icon', url: p.icon_data, dataUrl: p.icon_data, isExisting: true } : null;
     editHwImage = p.image_data ? { name: p.image_name || p.photos?.[0] || 'Product image', url: p.image_data, dataUrl: p.image_data, isExisting: true } : null;
     editHwFormat = p.product_format || 'standard';
-    const publishedHW = PRODUCTS.filter(x => x.product_type === 'hardware' && x.status === 'published');
-    // Currently-referenced hardware that is no longer published: shown checked but disabled (pruned on publish, not silently here)
-    const unpublishedRefHW = (p.compatible_hardware || [])
-        .map(hid => PRODUCTS.find(x => x.id === hid))
-        .filter(h => h && h.status !== 'published');
-    const compatHwChoices = [...publishedHW, ...unpublishedRefHW];
     const activeIndustries = SOFTWARE_INDUSTRY_OPTIONS.filter(o => o.is_active);
     const activeHwTypes = HARDWARE_PRODUCT_TYPES.filter(o => o.is_active);
 
@@ -2498,21 +2562,6 @@ function showEditProductModal(pid, source) {
                 <div id="edit-p-icon-error" class="field-error-text"></div>
             </div>
             <div id="edit-p-icon-status"></div>
-        `)}
-        ${createFormSection('ph-hard-drives', 'Compatibility', 'Hardware products that pair with this software.', `
-            <div class="field-label mb-3">Compatible Hardware</div>
-            <div id="edit-p-compat-hw" class="space-y-2">
-                ${compatHwChoices.map(h => {
-                    const isUnpub = h.status !== 'published';
-                    return `<label class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm text-[#1d1d1f] ${isUnpub ? 'opacity-60' : 'cursor-pointer hover:bg-[#f5f5f7]'} transition">
-                    <input type="checkbox" value="${esc(h.id)}" class="w-4 h-4 accent-aiso" ${(p.compatible_hardware || []).includes(h.id) ? 'checked' : ''} ${isUnpub ? 'disabled' : ''}>
-                    <i class="ph ph-hard-drives text-aiso"></i>
-                    <span class="font-semibold text-[#1d1d1f]">${esc(h.name)}${isUnpub ? ' <span style="color:#d97706;font-weight:500">(not published)</span>' : ''}</span>
-                    <span class="ml-auto text-xs text-[#86868b]">${esc(h.model || h.sub_category || '')}</span>
-                </label>`;
-                }).join('')}
-                ${!compatHwChoices.length ? '<div class="text-xs text-[#86868b] italic">No published hardware products available</div>' : ''}
-            </div>
         `)}`;
 
     const hwFmt = p.product_format || 'standard';
@@ -2957,7 +3006,6 @@ async function saveProduct(pid) {
             p.tagline = val('edit-p-tagline');
             p.features = Array.from({ length: SOFTWARE_FEATURE_MAX_ITEMS }, (_, i) => val(`edit-p-feat-${i}`)).filter(Boolean);
             p.industries = Array.from(document.querySelectorAll('#edit-p-industries input:checked')).map(cb => cb.value);
-            p.compatible_hardware = Array.from(document.querySelectorAll('#edit-p-compat-hw input:checked')).map(cb => cb.value);
             const photoData = editSwImages.map(img => img.dataUrl || img.url || '').filter(Boolean);
             p.photos = editSwImages.map(img => img.name);
             p.image_name = editSwImages[0]?.name || '';
@@ -3133,9 +3181,186 @@ function renderParamCenter() {
     renderParamPackaging();
     renderParamTagList('param-sw-categories', SOFTWARE_CATEGORY_OPTIONS, 'sw-cat');
     renderParamTagList('param-sw-industries', SOFTWARE_INDUSTRY_OPTIONS, 'sw-ind');
+    renderParamTagList('param-sw-license', SOFTWARE_LICENSE_OPTIONS, 'sw-lic');
     renderParamTagList('param-hw-types', HARDWARE_PRODUCT_TYPES, 'hw-type');
     renderDisplayOrder('software');
     renderDisplayOrder('hardware');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COMPATIBILITY MAPPING — standalone view, parallel to Parameter Center
+// ═══════════════════════════════════════════════════════════════════
+
+function getCompatibilityHardware(product) {
+    return (product.compatible_hardware || [])
+        .map(hardwareId => PRODUCTS.find(item => item.id === hardwareId && item.product_type === 'hardware'))
+        .filter(Boolean);
+}
+
+function renderCompatibilityCenter() {
+    if (!canViewCompatibility()) return;
+    const target = document.getElementById('compat-tbody');
+    const summary = document.getElementById('compat-summary');
+    if (!target) return;
+
+    const publishedSoftware = PRODUCTS.filter(product => product.product_type === 'software' && product.status === 'published');
+    const mappedCount = publishedSoftware.filter(product => getCompatibilityHardware(product).length > 0).length;
+    const publishedHardwareCount = PRODUCTS.filter(product => product.product_type === 'hardware' && product.status === 'published').length;
+    const unconfiguredCount = publishedSoftware.length - mappedCount;
+    const summaryChip = (label, count, color) => `<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;background:#fafbfc;border:1px solid var(--border-light)">
+        <span style="width:8px;height:8px;border-radius:50%;background:${color}"></span>
+        <strong style="font-size:12px;color:#1d1d1f">${count}</strong>
+        <span style="font-size:11px;color:#86868b;font-weight:500">${label}</span>
+    </div>`;
+    if (summary) {
+        summary.innerHTML = summaryChip('Published software', publishedSoftware.length, '#1d1d1f')
+            + summaryChip('Mapped', mappedCount, '#059669')
+            + summaryChip('Not configured', unconfiguredCount, '#d97706')
+            + summaryChip('Published hardware', publishedHardwareCount, '#1432e6');
+    }
+
+    const search = (document.getElementById('compat-search')?.value || '').trim().toLowerCase();
+    const rows = publishedSoftware
+        .filter(product => !search || [product.name, product.vendor_name, product.sub_category]
+            .some(value => String(value || '').toLowerCase().includes(search)))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    target.innerHTML = rows.length ? rows.map(product => {
+        const hardware = getCompatibilityHardware(product);
+        const shown = hardware.slice(0, 2);
+        const remaining = hardware.length - shown.length;
+        const isBundled = product.sw_category === 'included';
+        const canEdit = canManageCompatibility();
+        const hardwareHtml = hardware.length
+            ? `<div class="flex flex-wrap gap-1.5">${shown.map(item => `<span class="badge badge-zinc"><i class="ph ph-hard-drives"></i> ${esc(item.name)}</span>`).join('')}${remaining > 0 ? `<span class="badge badge-zinc">+${remaining}</span>` : ''}</div>`
+            : `<span style="font-size:12px;color:${isBundled ? '#d97706' : '#86868b'};font-weight:${isBundled ? '600' : '400'}"><i class="ph ${isBundled ? 'ph-warning-circle' : 'ph-minus-circle'}"></i> ${isBundled ? 'Bundled · mapping needed' : 'Not configured'}</span>`;
+        return `<tr>
+            <td>
+                <div class="flex items-center gap-3">
+                    <div style="width:36px;height:36px;border-radius:10px;background:#f5f5f7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#86868b;flex-shrink:0">${esc(product.name.slice(0, 2).toUpperCase())}</div>
+                    <div>
+                        <div style="font-weight:600;font-size:13.5px;color:#1d1d1f">${esc(product.name)}</div>
+                        <div style="font-size:12px;color:#86868b;margin-top:1px">${esc(product.vendor_name || '—')} · ${esc(product.sub_category || 'Software')}</div>
+                    </div>
+                </div>
+            </td>
+            <td><span class="badge ${isBundled ? 'badge-green' : 'badge-zinc'}"><i class="ph ${isBundled ? 'ph-package' : 'ph-plus-circle'}"></i> ${isBundled ? 'Bundled' : 'Add-on'}</span></td>
+            <td>${hardwareHtml}</td>
+            <td class="text-right">
+                <button type="button" class="btn-ghost" onclick="showCompatibilityModal('${product.id}')" ${canEdit ? '' : 'disabled'} title="${canEdit ? 'Edit compatibility' : 'Permission required'}" style="${canEdit ? '' : 'opacity:.4;cursor:not-allowed'}"><i class="ph ph-pencil-simple"></i> Edit</button>
+            </td>
+        </tr>`;
+    }).join('') : `<tr><td colspan="4" class="text-center py-16">${emptyState('ph-arrows-left-right', search ? EMPTY_STATE_NO_RESULTS : EMPTY_STATE_NO_DATA)}</td></tr>`;
+}
+
+function showCompatibilityModal(softwareId) {
+    if (!canManageCompatibility()) {
+        showToast('You do not have permission to update compatibility mappings.', 'error');
+        return;
+    }
+    const software = PRODUCTS.find(product => product.id === softwareId && product.product_type === 'software');
+    if (!software) return;
+    if (software.status !== 'published') {
+        showToast('Only published software compatibility can be edited.', 'error');
+        return;
+    }
+
+    const selectedIds = new Set(software.compatible_hardware || []);
+    const publishedHardware = PRODUCTS
+        .filter(product => product.product_type === 'hardware' && product.status === 'published')
+        .sort((a, b) => a.name.localeCompare(b.name));
+    const unavailableSelected = Array.from(selectedIds)
+        .map(hardwareId => PRODUCTS.find(product => product.id === hardwareId && product.product_type === 'hardware'))
+        .filter(product => product && product.status !== 'published');
+    const hardwareRows = publishedHardware.map(hardware => {
+        const searchValue = [hardware.name, hardware.vendor_name, hardware.brand, hardware.model, hardware.sub_category].filter(Boolean).join(' ').toLowerCase();
+        return `<label class="compatibility-hardware-row" data-compat-search="${esc(searchValue)}" style="display:flex;align-items:center;gap:12px;padding:11px 12px;border:1px solid var(--border-light);border-radius:12px;cursor:pointer;background:#fff">
+            <input type="checkbox" name="compat-hardware" value="${esc(hardware.id)}" class="w-4 h-4 accent-aiso" ${selectedIds.has(hardware.id) ? 'checked' : ''} onchange="updateCompatibilitySelectionCount()">
+            <span style="width:34px;height:34px;border-radius:10px;background:#f5f5f7;display:grid;place-items:center;flex-shrink:0"><i class="ph ph-hard-drives" style="color:#1d2e7b"></i></span>
+            <span style="min-width:0;flex:1">
+                <span style="display:block;font-size:13px;font-weight:600;color:#1d1d1f">${esc(hardware.name)}</span>
+                <span style="display:block;font-size:11px;color:#86868b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc([hardware.vendor_name, hardware.brand, hardware.model || hardware.sub_category].filter(Boolean).join(' · '))}</span>
+            </span>
+        </label>`;
+    }).join('');
+
+    showModal(`
+        <div>
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px">
+                <div>
+                    <div style="font-size:11px;font-weight:700;color:#86868b;text-transform:uppercase;letter-spacing:.06em">Compatibility Mapping</div>
+                    <h3 style="font-size:1.15rem;font-weight:700;color:#1d1d1f;margin:4px 0">${esc(software.name)}</h3>
+                    <p style="font-size:12px;color:#86868b;margin:0">Select published hardware products that can pair with this software.</p>
+                </div>
+                <button type="button" class="btn-ghost" onclick="closeModal()" aria-label="Close"><i class="ph ph-x" style="font-size:18px"></i></button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px">
+                <div class="filter-search" style="flex:1;max-width:none">
+                    <i class="ph ph-magnifying-glass"></i>
+                    <input id="compat-hardware-search" type="text" placeholder="Search hardware, brand, or model..." oninput="filterCompatibilityHardware(this.value)">
+                </div>
+                <span id="compat-selected-count" style="font-size:12px;font-weight:600;color:#1d2e7b">${publishedHardware.filter(item => selectedIds.has(item.id)).length} selected</span>
+            </div>
+            ${unavailableSelected.length ? `<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 11px;margin-bottom:12px"><i class="ph ph-warning-circle"></i> ${unavailableSelected.length} unavailable mapping${unavailableSelected.length === 1 ? '' : 's'} will be removed when you save.</div>` : ''}
+            <div id="compat-hardware-list" style="display:grid;gap:8px;max-height:360px;overflow-y:auto;padding-right:3px">
+                ${hardwareRows || '<div style="font-size:13px;color:#86868b;text-align:center;padding:28px 0">No published hardware products available.</div>'}
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border-light)">
+                <span style="font-size:11px;color:#86868b">Changes take effect immediately on the storefront.</span>
+                <div style="display:flex;gap:8px;flex-shrink:0">
+                    <button type="button" class="btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="saveCompatibility('${software.id}')"><i class="ph ph-floppy-disk"></i> Save Mapping</button>
+                </div>
+            </div>
+        </div>`);
+}
+
+function filterCompatibilityHardware(query) {
+    const normalized = String(query || '').trim().toLowerCase();
+    document.querySelectorAll('.compatibility-hardware-row').forEach(row => {
+        row.style.display = !normalized || (row.dataset.compatSearch || '').includes(normalized) ? 'flex' : 'none';
+    });
+}
+
+function updateCompatibilitySelectionCount() {
+    const count = document.querySelectorAll('input[name="compat-hardware"]:checked').length;
+    const target = document.getElementById('compat-selected-count');
+    if (target) target.textContent = `${count} selected`;
+}
+
+function saveCompatibility(softwareId) {
+    if (!canManageCompatibility()) {
+        showToast('You do not have permission to update compatibility mappings.', 'error');
+        return;
+    }
+    const software = PRODUCTS.find(product => product.id === softwareId && product.product_type === 'software');
+    if (!software || software.status !== 'published') return;
+
+    const previousIds = Array.from(new Set(software.compatible_hardware || []));
+    const nextIds = Array.from(document.querySelectorAll('input[name="compat-hardware"]:checked')).map(input => input.value);
+    const unchanged = previousIds.length === nextIds.length && previousIds.every(id => nextIds.includes(id));
+    if (unchanged) {
+        closeModal();
+        showToast('No compatibility changes were made.');
+        return;
+    }
+
+    const hardwareName = id => PRODUCTS.find(product => product.id === id)?.name || id;
+    const added = nextIds.filter(id => !previousIds.includes(id)).map(hardwareName);
+    const removed = previousIds.filter(id => !nextIds.includes(id)).map(hardwareName);
+    const detailParts = [];
+    if (added.length) detailParts.push(`Added: ${added.join(', ')}`);
+    if (removed.length) detailParts.push(`Removed: ${removed.join(', ')}`);
+    const saved = commitPortalMutation(() => {
+        software.compatible_hardware = nextIds;
+        software.updated_at = new Date().toISOString().slice(0, 10);
+        logActivity('Compatibility updated', software.name, detailParts.join(' · ') || 'Mapping cleared', software.id);
+    });
+    if (!saved) return;
+
+    closeModal();
+    renderCompatibilityCenter();
+    showToast(`${software.name} compatibility updated and applied immediately.`);
 }
 
 /* ── Packaging table ── */
@@ -3195,6 +3420,12 @@ function renderParamTagList(containerId, dataArr, prefix) {
                     ${item.is_active
                         ? 'bg-white border-[#e8eaed] text-[#1d1d1f]'
                         : 'bg-[#fafbfc] border-dashed border-[#e8eaed] text-[#86868b] line-through'}">
+                    ${prefix === 'sw-lic' ? `<button type="button" class="w-5 h-5 rounded-full flex items-center justify-center transition hover:scale-110"
+                        style="background:${getLicenseBadgeColor(item.color).bg};border:1px solid rgba(0,0,0,0.06)"
+                        onclick="showLicenseBadgeColorModal(${idx})"
+                        title="Badge color: ${getLicenseBadgeColor(item.color).name}">
+                        <span style="width:8px;height:8px;border-radius:50%;background:${getLicenseBadgeColor(item.color).text}"></span>
+                    </button>` : ''}
                     <span>${esc(item.label)}</span>
                     <button type="button" class="ml-1 w-5 h-5 rounded-full flex items-center justify-center text-xs transition
                         ${item.is_active
@@ -3229,6 +3460,7 @@ function renderParamTagList(containerId, dataArr, prefix) {
 function getParamDataArr(prefix) {
     if (prefix === 'sw-cat') return SOFTWARE_CATEGORY_OPTIONS;
     if (prefix === 'sw-ind') return SOFTWARE_INDUSTRY_OPTIONS;
+    if (prefix === 'sw-lic') return SOFTWARE_LICENSE_OPTIONS;
     if (prefix === 'hw-type') return HARDWARE_PRODUCT_TYPES;
     return [];
 }
@@ -3236,6 +3468,7 @@ function getParamDataArr(prefix) {
 function getParamContainerId(prefix) {
     if (prefix === 'sw-cat') return 'param-sw-categories';
     if (prefix === 'sw-ind') return 'param-sw-industries';
+    if (prefix === 'sw-lic') return 'param-sw-license';
     if (prefix === 'hw-type') return 'param-hw-types';
     return '';
 }
@@ -3258,10 +3491,52 @@ function addParamTag(prefix) {
         showToast('This item already exists', 'warning');
         return;
     }
-    if (!commitPortalMutation(() => { arr.push({ label: value, is_active: true }); })) return;
+    const newItem = { label: value, is_active: true };
+    if (prefix === 'sw-lic') newItem.color = LICENSE_BADGE_DEFAULT_COLOR;
+    if (!commitPortalMutation(() => { arr.push(newItem); })) return;
     input.value = '';
     renderParamTagList(getParamContainerId(prefix), arr, prefix);
     showToast(`${value} has been added successfully.`);
+}
+
+/* ── Licensing badge color (sw-lic only) ── */
+function showLicenseBadgeColorModal(idx) {
+    const item = SOFTWARE_LICENSE_OPTIONS[idx];
+    if (!item) return;
+    const currentKey = getLicenseBadgeColor(item.color).key;
+    const swatches = LICENSE_BADGE_COLORS.map(c => `
+        <button type="button" onclick="setLicenseBadgeColor(${idx}, '${c.key}')"
+            style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 6px;border-radius:12px;cursor:pointer;background:${c.key === currentKey ? '#fafbfc' : 'transparent'};border:1.5px solid ${c.key === currentKey ? '#1d2e7b' : 'var(--border-light)'}">
+            <span style="width:26px;height:26px;border-radius:50%;background:${c.bg};border:1px solid rgba(0,0,0,0.06);display:grid;place-items:center">
+                <span style="width:11px;height:11px;border-radius:50%;background:${c.text}"></span>
+            </span>
+            <span style="font-size:10.5px;font-weight:600;color:${c.key === currentKey ? '#1d2e7b' : '#86868b'}">${c.name}</span>
+        </button>`).join('');
+    showModal(`
+        <div>
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px">
+                <div>
+                    <div style="font-size:11px;font-weight:700;color:#86868b;text-transform:uppercase;letter-spacing:.06em">Licensing Options</div>
+                    <h3 style="font-size:1.1rem;font-weight:700;color:#1d1d1f;margin:4px 0">Badge Color</h3>
+                    <p style="font-size:12px;color:#86868b;margin:0">Pick the storefront badge color for this licensing offer.</p>
+                </div>
+                <button type="button" class="btn-ghost" onclick="closeModal()" aria-label="Close"><i class="ph ph-x" style="font-size:18px"></i></button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;padding:18px;border:1px solid var(--border-light);border-radius:12px;background:#fafbfc;margin-bottom:16px">
+                ${renderSwLicenseBadge(item.label).replace('style="', 'style="margin-top:0;')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px">${swatches}</div>
+        </div>`);
+}
+
+function setLicenseBadgeColor(idx, key) {
+    const item = SOFTWARE_LICENSE_OPTIONS[idx];
+    if (!item || !LICENSE_BADGE_COLORS.some(c => c.key === key)) return;
+    if (getLicenseBadgeColor(item.color).key === key) { closeModal(); return; }
+    if (!commitPortalMutation(() => { item.color = key; })) return;
+    closeModal();
+    renderParamTagList('param-sw-license', SOFTWARE_LICENSE_OPTIONS, 'sw-lic');
+    showToast(`"${item.label}" badge color changed to ${getLicenseBadgeColor(key).name}.`);
 }
 
 // Products currently using a given parameter value (so deletion can be blocked).

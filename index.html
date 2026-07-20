@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AISO Portal v2 | Simplified Prototype</title>
+    <title>AISO Portal v3 | Compatibility Management Prototype</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <script>
@@ -43,6 +43,7 @@
             width: 100%; padding: 0.6rem 0.9rem; margin-bottom: 1px;
             border-radius: 0.5rem; border: none;
             font-size: 0.82rem; font-weight: 500; color: rgba(255,255,255,0.55);
+            text-align: left; line-height: 1.35;
             transition: all 180ms ease; cursor: pointer; user-select: none;
             background: transparent;
         }
@@ -51,7 +52,8 @@
             background: rgba(255,255,255,0.12); color: #ffffff;
             font-weight: 600;
         }
-        .nav-item .nav-icon { width: 1.25rem; display: inline-flex; align-items: center; justify-content: center; }
+        .nav-item .nav-icon { width: 1.25rem; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+        .nav-item > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         .badge {
             display: inline-flex; align-items: center; justify-content: center;
@@ -120,6 +122,18 @@
             font-size: 13px; font-weight: 400; color: #1d1d1f; width: 100%;
         }
         .filter-search input::placeholder { color: #c7c7cc; }
+
+        /* Pill select, visually paired with .filter-search */
+        .select-field {
+            appearance: none; -webkit-appearance: none;
+            padding: 6px 34px 6px 14px; border: none; border-radius: 980px;
+            background: #f5f5f7 url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%2386868b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+            background-size: 13px;
+            font-size: 13px; font-weight: 500; color: #1d1d1f;
+            cursor: pointer; transition: all 200ms;
+        }
+        .select-field:hover { background-color: #ebebed; }
+        .select-field:focus { outline: none; background-color: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.08); }
 
         /* ── Display Order List ── */
         .order-list { display: flex; flex-direction: column; }
@@ -592,6 +606,11 @@
             border-radius: 999px; background: rgba(29,46,123,0.08); color: #1d2e7b;
             font-size: 0.76rem; font-weight: 600;
         }
+        .sd-license-badge {
+            display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; margin-top: 8px;
+            border-radius: 999px; background: #ecfdf5; color: #047857;
+            font-size: 0.7rem; font-weight: 700; letter-spacing: 0.01em; white-space: nowrap;
+        }
         .sd-gallery { position: relative; margin: 0 32px; border-radius: 14px; overflow: hidden; background: #e8ecf4; aspect-ratio: 16/10; }
         .sd-gallery-img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .sd-gallery-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #9aa6bf; font-size: 2rem; }
@@ -828,6 +847,14 @@
                         </div>
                         <div class="border border-[#f1f3f5] rounded-lg px-5 py-4" id="param-sw-industries"></div>
                     </section>
+
+                    <section>
+                        <div class="mb-3">
+                            <h3 class="text-sm font-semibold flex items-center gap-2"><i class="ph ph-certificate text-aiso"></i> Licensing Options</h3>
+                            <p class="text-xs text-[#86868b] mt-0.5">Licensing offers selectable per software product, shown as a badge on the storefront. Single choice. Disabled items are hidden from vendors. Click a label's color dot to change its badge color.</p>
+                        </div>
+                        <div class="border border-[#f1f3f5] rounded-lg px-5 py-4" id="param-sw-license"></div>
+                    </section>
                 </div>
 
                 <!-- ─── Hardware Parameters Tab ─── -->
@@ -848,6 +875,25 @@
                         <div class="border border-[#f1f3f5] rounded-lg px-5 py-4" id="param-hw-types"></div>
                     </section>
                 </div>
+            </div>
+
+            <!-- ====== COMPATIBILITY MAPPING ====== -->
+            <div id="view-compatibility" class="view hidden">
+                <section class="space-y-4">
+                    <div id="compat-summary" class="flex flex-wrap gap-2"></div>
+                    <div class="filter-bar" style="padding-bottom:0">
+                        <div class="filter-search">
+                            <i class="ph ph-magnifying-glass"></i>
+                            <input id="compat-search" type="text" placeholder="Search software..." oninput="renderCompatibilityCenter()">
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto border-t border-gray-100">
+                        <table class="data-table w-full">
+                            <thead><tr><th style="width:30%">Software Product</th><th style="width:14%">Packaging</th><th style="width:44%">Compatible Hardware</th><th style="width:12%">Actions</th></tr></thead>
+                            <tbody id="compat-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
 
             <!-- ====== ACTIVITY LOG ====== -->
